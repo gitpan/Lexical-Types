@@ -15,12 +15,18 @@ BEGIN {
 
 use threads;
 
-use Test::More tests => 10 * 2;
+use Test::More tests => 10 * 2 * (1 + 2);
 
 {
  package Lexical::Types::Test::Tag;
 
- sub TYPEDSCALAR { $_[1] = threads->tid() }
+ sub TYPEDSCALAR {
+  my $tid = threads->tid();
+  Test::More::is($_[0], __PACKAGE__, "base type is correct in thread $tid");
+  Test::More::is($_[2], 'Tag', "original type is correct in thread $tid");
+  $_[1] = $tid;
+  ();
+ }
 }
 
 { package Tag; }

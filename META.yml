@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Lexical-Types
-version:            0.01
+version:            0.02
 abstract:           Extend the semantics of typed lexicals.
 author:
     - Vincent Pit <perl@profvince.com>

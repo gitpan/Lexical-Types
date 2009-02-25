@@ -121,9 +121,9 @@ STATIC OP *lt_pp_padsv(pTHX) {
 
    PUSHMARK(SP);
    EXTEND(SP, 3);
-   PUSHs(sv_2mortal(newSVsv(oi->type_pkg)));
+   PUSHs(oi->type_pkg);
    PUSHs(sv);
-   PUSHs(sv_2mortal(newSVsv(oi->orig_pkg)));
+   PUSHs(oi->orig_pkg);
    PUTBACK;
 
    items = call_sv(oi->type_meth, G_ARRAY | G_METHOD);
@@ -160,7 +160,7 @@ STATIC OP *lt_pp_padsv(pTHX) {
  * pp_padsv, but much less than if we would have set PL_ppaddr[OP_PADSV]
  * globally. */
 
-STATIC U32 lt_TYPEDSCALAR_hash = 0; 
+STATIC SV *lt_default_meth = NULL;
 
 STATIC OP *(*lt_old_ck_padany)(pTHX_ OP *) = 0;
 
@@ -175,13 +175,12 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  stash = PL_in_my_stash;
  if (stash && (hint = lt_hint())) {
   SV *orig_pkg  = newSVpvn(HvNAME_get(stash), HvNAMELEN_get(stash));
-  SV *orig_meth = newSVpvn_share("TYPEDSCALAR", 11, lt_TYPEDSCALAR_hash);
+  SV *orig_meth = lt_default_meth;
   SV *type_pkg  = orig_pkg;
   SV *type_meth = orig_meth;
   SV *code      = INT2PTR(SV *, SvUVX(hint));
 
   SvREADONLY_on(orig_pkg);
-  SvREADONLY_on(orig_meth);
 
   if (code) {
    int items;
@@ -201,16 +200,23 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
    SPAGAIN;
    if (items > 2)
     croak(__PACKAGE__ " mangler should return zero, one or two scalars, but got %d", items);
-   if (items) {
+   if (items == 0) {
+    SvREFCNT_dec(orig_pkg);
+    goto skip;
+   } else {
     SV *rsv;
     if (items > 1) {
      rsv = POPs;
-     if (SvOK(rsv))
+     if (SvOK(rsv)) {
       type_meth = newSVsv(rsv);
+      SvREADONLY_on(type_meth);
+     }
     }
     rsv = POPs;
-    if (SvOK(rsv))
+    if (SvOK(rsv)) {
      type_pkg = newSVsv(rsv);
+     SvREADONLY_on(type_pkg);
+    }
    }
    PUTBACK;
 
@@ -218,11 +224,15 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
    LEAVE;
   }
 
-  lt_old_pp_padsv     = PL_ppaddr[OP_PADSV];
+  if (type_meth == orig_meth)
+   SvREFCNT_inc(orig_meth);
   lt_map_store(o, orig_pkg, type_pkg, type_meth, lt_old_pp_padsv);
+
+  lt_old_pp_padsv     = PL_ppaddr[OP_PADSV];
   PL_ppaddr[OP_PADSV] = lt_pp_padsv;
  }
 
+skip:
  return o;
 }
 
@@ -244,7 +254,8 @@ PROTOTYPES: DISABLE
 BOOT: 
 {                                    
  if (!lt_initialized++) {
-  PERL_HASH(lt_TYPEDSCALAR_hash, "TYPEDSCALAR", 11);
+  lt_default_meth = newSVpvn("TYPEDSCALAR", 11);
+  SvREADONLY_on(lt_default_meth);
 
   PERL_HASH(lt_hash, __PACKAGE__, __PACKAGE_LEN__);
   lt_op_map = newHV();

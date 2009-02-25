@@ -13,13 +13,13 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.01
+Version 0.02
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.01';
+ $VERSION = '0.02';
 }
 
 =head1 SYNOPSIS
@@ -36,7 +36,7 @@ BEGIN {
 
 =head1 DESCRIPTION
 
-This module allows you to hook the execution of typed lexicals declarations (C<my Foo $x>).
+This module allows you to hook the execution of typed lexicals declarations (C<my Str $x>).
 In particular, it can be used to automatically tie or bless typed lexicals.
 
 It is B<not> implemented with a source filter.
@@ -53,36 +53,51 @@ BEGIN {
 =head2 C<< import [ as => [ $prefix | $mangler ] ] >>
 
 Magically called when writing C<use Lexical::Types>.
-All the occurences of C<my Foo $x> in the current lexical scope will be changed to call at each run a given method in a given package.
-The method and package are determined by the parameter C<as> :
+All the occurences of C<my Str $x> in the current lexical scope will be changed to call at each run a given method in a given package.
+The method and package are determined by the parameter C<'as'> :
 
 =over 4
 
 =item *
 
-If it's left unspecified, the C<TYPEDSCALAR> method in the C<Foo> package will be called.
+If it's left unspecified, the C<TYPEDSCALAR> method in the C<Str> package will be called.
 
     use Lexical::Types;
     my Str $x; # calls Str->TYPEDSCALAR
 
 =item *
 
-If a plain scalar C<$prefix> is passed as the value, the C<TYPEDSCALAR> method in the C<${prefix}::Foo> package will be used.
+If a plain scalar C<$prefix> is passed as the value, the C<TYPEDSCALAR> method in the C<${prefix}::Str> package will be used.
 
     use Lexical::Types as => 'My::'; # or "as => 'My'"
     my Str $x; # calls My::Str->TYPEDSCALAR
 
 =item *
 
-If the value given is a code reference C<$mangler>, it will be called at compile-time with arguments C<'Foo'> and C<'TYPEDSCALAR'> and is expected to return the desired package and method name (in that order).
-If any of those is C<undef>, the default value will be used instead.
+If the value given is a code reference C<$mangler>, it will be called at compile-time with arguments C<'Str'> and C<'TYPEDSCALAR'> and is expected to return :
+
+=over 4
+
+=item *
+
+either an empty list, in which case the current typed lexical definition will be skipped (thus it won't be altered to trigger a run-time hook) ;
+
+    use Lexical::Types as => sub { return $_[0] =~ /Str/ ? () : @_ };
+    my Str $x; # nothing special
+    my Int $y; # calls Int->TYPEDSCALAR
+
+=item *
+
+or the desired package and method name, in that order (if any of those is C<undef>, the default value will be used instead).
 
     use Lexical::Types as => sub { 'My', 'new_' . lc($_[0]) };
     my Str $x; # the coderef indicates to call My->new_str
 
 =back
 
-The initializer method receives an alias to the pad entry of C<$x> in C<$_[1]> and the original type name (C<Foo>) in C<$_[2]>.
+=back
+
+The initializer method receives an alias to the pad entry of C<$x> in C<$_[1]> and the original type name (C<Str>) in C<$_[2]>.
 You can either edit C<$_[1]> in place, in which case you should return an empty list, or return a new scalar that will be copied into C<$x>.
 
 =cut
@@ -150,7 +165,7 @@ You can integrate L<Lexical::Types> in your module so that using it will provide
 
 =head1 CAVEATS
 
-For C<perl> to be able to parse C<my Foo $x>, the package C<Foo> must be defined somewhere, and this even if you use the C<as> option to redirect to another package.
+For C<perl> to be able to parse C<my Str $x>, the package C<Str> must be defined somewhere, and this even if you use the C<'as'> option to redirect to another package.
 It's unlikely to find a workaround, as this happens deep inside the lexer, far from the reach of an extension.
 
 Only one mangler or prefix can be in use at the same time in a given scope.

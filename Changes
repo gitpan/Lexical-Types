@@ -1,5 +1,11 @@
 Revision history for Lexical-Types
 
+0.02    2009-02-25 16:10 UTC
+        + Add : Returning an empty list from the mangler skips the wrapping of
+                the current typed lexical declaration.
+        + Chg : The package and method names passed to the callbacks are now all
+                read-only.
+
 0.01    2009-02-24 23:20 UTC
         First version, released on an unsuspecting world.
 

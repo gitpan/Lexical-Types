@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 11 + 6;
+use Test::More tests => 12 + 6;
 
 {
  package Lexical::Types::Test::LTT;
@@ -45,6 +45,12 @@ use Test::More tests => 11 + 6;
  use Lexical::Types as => 'Lexical::Types::Test::';
  my LTT $x;
  is $x, __LINE__-1, 'as => string, with trailing ::';
+}
+
+{
+ use Lexical::Types as => sub { return };
+ my LTT $x;
+ is $x, undef, 'as => code, returning nothing';
 }
 
 {
