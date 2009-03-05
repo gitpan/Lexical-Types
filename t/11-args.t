@@ -26,7 +26,7 @@ use Test::More tests => 12 + 6;
 
 {
  package LTT;
- 
+
  no warnings 'once';
  *ts = \&Lexical::Types::Test::LTT::TYPEDSCALAR
 }

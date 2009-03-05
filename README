@@ -2,21 +2,35 @@ NAME
     Lexical::Types - Extend the semantics of typed lexicals.
 
 VERSION
-    Version 0.02
+    Version 0.03
 
 SYNOPSIS
-        {
-         package Str;
+        { package Str; }
 
-         sub TYPEDSCALAR { Some::String::Implementation->new }
+        {
+         package My::Types::Str;
+
+         sub new { bless { }, shift }
+        }
+
+        use Lexical::Types as => sub { 'My::Types::' . $_[0] => 'new' };
+
+        my Str $x; # $x is now a My::Types::Str object
+
+        {
+         package My::Types::Int;
+
+         sub TYPEDSCALAR { bless { }, shift }
         }
 
         use Lexical::Types;
 
-        my Str $x; # $x is now a Some::String::Implementation object
+        use constant Int => 'My::Types::Int';
+
+        my Int $y; # $y is now a My::Types::Int object
 
 DESCRIPTION
-    This module allows you to hook the execution of typed lexicals
+    This pragma allows you to hook the execution of typed lexicals
     declarations ("my Str $x"). In particular, it can be used to
     automatically tie or bless typed lexicals.
 
@@ -49,9 +63,9 @@ FUNCTIONS
             definition will be skipped (thus it won't be altered to trigger
             a run-time hook) ;
 
-                use Lexical::Types as => sub { return $_[0] =~ /Str/ ? () : @_ };
-                my Str $x; # nothing special
-                my Int $y; # calls Int->TYPEDSCALAR
+                use Lexical::Types as => sub { return $_[0] =~ /Str/ ? @_ : () };
+                my Str $y; # calls Str->TYPEDSCALAR
+                my Int $x; # nothing special
 
         *   or the desired package and method name, in that order (if any of
             those is "undef", the default value will be used instead).
@@ -65,7 +79,7 @@ FUNCTIONS
     scalar that will be copied into $x.
 
   "unimport"
-    Magically called when writing "no Lexical::Types". Turns the module off.
+    Magically called when writing "no Lexical::Types". Turns the pragma off.
 
 INTEGRATION
     You can integrate Lexical::Types in your module so that using it will
@@ -92,10 +106,15 @@ INTEGRATION
         sub new_int { ... }
 
 CAVEATS
-    For "perl" to be able to parse "my Str $x", the package "Str" must be
-    defined somewhere, and this even if you use the 'as' option to redirect
-    to another package. It's unlikely to find a workaround, as this happens
-    deep inside the lexer, far from the reach of an extension.
+    For "perl" to be able to parse "my Str $x", you need :
+
+    *   either the "Str" package to be defined ;
+
+    *   or for "Str" to be a constant sub returning a valid defined package.
+
+    Those restrictions apply even if you use the 'as' option to redirect to
+    another package, and are unlikely to find a workaround as this happens
+    deep inside the lexer - far from the reach of an extension.
 
     Only one mangler or prefix can be in use at the same time in a given
     scope.
@@ -130,6 +149,8 @@ SUPPORT
 
 ACKNOWLEDGEMENTS
     Inspired by Ricardo Signes.
+
+    Thanks Florian Ragwitz for suggesting the use of constants for types.
 
 COPYRIGHT & LICENSE
     Copyright 2009 Vincent Pit, all rights reserved.

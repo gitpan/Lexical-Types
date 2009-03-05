@@ -1,5 +1,12 @@
 Revision history for Lexical-Types
 
+0.03    2009-03-05 21:15 UTC
+        + Doc : Discuss about using constants for types.
+        + Fix : The PL_ppaddr[OP_PADSV] localization logic was refined so that
+                it is kinder to other modules that replace it.
+        + Tst : "my Str ($x, $y)" and "for my Str $x ()" constructs
+        + Tst : uvar magic, magical tags.
+
 0.02    2009-02-25 16:10 UTC
         + Add : Returning an empty list from the mangler skips the wrapping of
                 the current typed lexical declaration.

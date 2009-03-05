@@ -103,8 +103,6 @@ STATIC const lt_op_info *lt_map_fetch(pTHX_ const OP *o) {
 
 /* ... Our pp_padsv ........................................................ */
 
-STATIC OP *(*lt_old_pp_padsv)(pTHX) = 0;
-
 STATIC OP *lt_pp_padsv(pTHX) {
  const lt_op_info *oi;
 
@@ -147,7 +145,28 @@ STATIC OP *lt_pp_padsv(pTHX) {
   return CALL_FPTR(oi->pp_padsv)(aTHX);
  }
 
- return CALL_FPTR(lt_old_pp_padsv)(aTHX);
+ return CALL_FPTR(PL_ppaddr[OP_PADSV])(aTHX);
+}
+
+STATIC OP *(*lt_pp_padsv_saved)(pTHX) = 0;
+
+STATIC void lt_pp_padsv_save(void) {
+ if (lt_pp_padsv_saved)
+  return;
+
+ lt_pp_padsv_saved   = PL_ppaddr[OP_PADSV];
+ PL_ppaddr[OP_PADSV] = lt_pp_padsv;
+}
+
+STATIC void lt_pp_padsv_restore(OP *o) {
+ if (!lt_pp_padsv_saved)
+  return;
+
+ if (o->op_ppaddr == lt_pp_padsv)
+  o->op_ppaddr = lt_pp_padsv_saved;
+
+ PL_ppaddr[OP_PADSV] = lt_pp_padsv_saved;
+ lt_pp_padsv_saved   = 0;
 }
 
 /* ... Our ck_pad{any,sv} .................................................. */
@@ -168,7 +187,7 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  HV *stash;
  SV *hint;
 
- PL_ppaddr[OP_PADSV] = lt_old_pp_padsv;
+ lt_pp_padsv_restore(o);
 
  o = CALL_FPTR(lt_old_ck_padany)(aTHX_ o);
 
@@ -226,10 +245,10 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
 
   if (type_meth == orig_meth)
    SvREFCNT_inc(orig_meth);
-  lt_map_store(o, orig_pkg, type_pkg, type_meth, lt_old_pp_padsv);
 
-  lt_old_pp_padsv     = PL_ppaddr[OP_PADSV];
-  PL_ppaddr[OP_PADSV] = lt_pp_padsv;
+  lt_pp_padsv_save();
+
+  lt_map_store(o, orig_pkg, type_pkg, type_meth, lt_pp_padsv_saved);
  }
 
 skip:
@@ -239,7 +258,8 @@ skip:
 STATIC OP *(*lt_old_ck_padsv)(pTHX_ OP *) = 0;
 
 STATIC OP *lt_ck_padsv(pTHX_ OP *o) {
- PL_ppaddr[OP_PADSV] = lt_old_pp_padsv;
+ lt_pp_padsv_restore(o);
+
  return CALL_FPTR(lt_old_ck_padsv)(aTHX_ o);
 }
 
@@ -264,7 +284,6 @@ BOOT:
   PL_check[OP_PADANY] = MEMBER_TO_FPTR(lt_ck_padany);
   lt_old_ck_padsv     = PL_check[OP_PADSV];
   PL_check[OP_PADSV]  = MEMBER_TO_FPTR(lt_ck_padsv);
-  lt_old_pp_padsv     = PL_ppaddr[OP_PADSV];
  }
 }
 

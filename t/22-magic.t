@@ -7,7 +7,7 @@ use Test::More;
 
 BEGIN {
  plan skip_all => 'Variable::Magic required to test magic'
-                                      unless eval "use Variable::Magic 0.31; 1";
+                                      unless eval "use Variable::Magic; 1";
 }
 
 {
@@ -28,7 +28,7 @@ BEGIN {
 { package Str; }
 
 BEGIN {
- plan tests => 2 * 6;
+ plan tests => 2 * 8;
 }
 
 use Lexical::Types as => 'Lexical::Types::Test';
@@ -52,6 +52,12 @@ sub check (&$$;$) {
  return $want ? @ret : $ret[0];
 }
 
+sub zzz {
+ my $d = Variable::Magic::getdata($_[0], $Lexical::Types::Test::Str::wiz);
+ isnt $d,    undef,  'typed lexicals are tagged';
+ is ref($d), 'HASH', 'typed lexicals are correctly tagged';
+}
+
 for (1 .. 2) {
  my Str $x = "abc";
 
@@ -64,4 +70,6 @@ for (1 .. 2) {
  my Str $z;
  check { $z = "bar" . $x } $z, { set => 1 }, 'scalar assign';
  is $z, 'barabcfoo', 'scalar assign correctly';
+
+ zzz($z);
 }

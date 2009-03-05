@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Lexical-Types
-version:            0.02
+version:            0.03
 abstract:           Extend the semantics of typed lexicals.
 author:
     - Vincent Pit <perl@profvince.com>
@@ -9,6 +9,7 @@ distribution_type:  module
 configure_requires:
     ExtUtils::MakeMaker:  0
 build_requires:
+    constant:             0
     ExtUtils::MakeMaker:  0
     Test::More:           0
 requires:

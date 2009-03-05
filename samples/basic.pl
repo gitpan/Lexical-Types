@@ -3,14 +3,30 @@
 use strict;
 use warnings;
 
-{
- package Str;
+use blib;
 
- sub TYPEDSCALAR { $_[1] = ' ' x 10 }
+{ package Str; }
+
+{
+ package My::Types::Str;
+
+ sub new { bless { }, shift }
+}
+
+use Lexical::Types as => sub { 'My::Types::' . $_[0] => 'new' };
+
+my Str $x; # $x is now a My::Types::Str object
+print ref($x), "\n"; # My::Types::Str;
+
+{
+ package My::Types::Int;
+
+ sub TYPEDSCALAR { bless { }, shift }
 }
 
 use Lexical::Types;
 
-my Str $x;
+use constant Int => 'My::Types::Int';
 
-print length($x), "\n"; # 10
+my Int $y; # $y is now a My::Types::Int object
+print ref($y), "\n"; # My::Types::Int;

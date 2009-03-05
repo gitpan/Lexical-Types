@@ -13,30 +13,44 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.02';
+ $VERSION = '0.03';
 }
 
 =head1 SYNOPSIS
 
-    {
-     package Str;
+    { package Str; }
 
-     sub TYPEDSCALAR { Some::String::Implementation->new }
+    {
+     package My::Types::Str;
+
+     sub new { bless { }, shift }
+    }
+
+    use Lexical::Types as => sub { 'My::Types::' . $_[0] => 'new' };
+
+    my Str $x; # $x is now a My::Types::Str object
+
+    {
+     package My::Types::Int;
+
+     sub TYPEDSCALAR { bless { }, shift }
     }
 
     use Lexical::Types;
 
-    my Str $x; # $x is now a Some::String::Implementation object
+    use constant Int => 'My::Types::Int';
+
+    my Int $y; # $y is now a My::Types::Int object
 
 =head1 DESCRIPTION
 
-This module allows you to hook the execution of typed lexicals declarations (C<my Str $x>).
+This pragma allows you to hook the execution of typed lexicals declarations (C<my Str $x>).
 In particular, it can be used to automatically tie or bless typed lexicals.
 
 It is B<not> implemented with a source filter.
@@ -82,9 +96,9 @@ If the value given is a code reference C<$mangler>, it will be called at compile
 
 either an empty list, in which case the current typed lexical definition will be skipped (thus it won't be altered to trigger a run-time hook) ;
 
-    use Lexical::Types as => sub { return $_[0] =~ /Str/ ? () : @_ };
-    my Str $x; # nothing special
-    my Int $y; # calls Int->TYPEDSCALAR
+    use Lexical::Types as => sub { return $_[0] =~ /Str/ ? @_ : () };
+    my Str $y; # calls Str->TYPEDSCALAR
+    my Int $x; # nothing special
 
 =item *
 
@@ -132,7 +146,7 @@ sub import {
 =head2 C<unimport>
 
 Magically called when writing C<no Lexical::Types>.
-Turns the module off.
+Turns the pragma off.
 
 =cut
 
@@ -165,8 +179,21 @@ You can integrate L<Lexical::Types> in your module so that using it will provide
 
 =head1 CAVEATS
 
-For C<perl> to be able to parse C<my Str $x>, the package C<Str> must be defined somewhere, and this even if you use the C<'as'> option to redirect to another package.
-It's unlikely to find a workaround, as this happens deep inside the lexer, far from the reach of an extension.
+For C<perl> to be able to parse C<my Str $x>, you need :
+
+=over 4
+
+=item *
+
+either the C<Str> package to be defined ;
+
+=item *
+
+or for C<Str> to be a constant sub returning a valid defined package.
+
+=back
+
+Those restrictions apply even if you use the C<'as'> option to redirect to another package, and are unlikely to find a workaround as this happens deep inside the lexer - far from the reach of an extension.
 
 Only one mangler or prefix can be in use at the same time in a given scope.
 
@@ -201,6 +228,8 @@ Tests code coverage report is available at L<http://www.profvince.com/perl/cover
 =head1 ACKNOWLEDGEMENTS
 
 Inspired by Ricardo Signes.
+
+Thanks Florian Ragwitz for suggesting the use of constants for types.
 
 =head1 COPYRIGHT & LICENSE
 
