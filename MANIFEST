@@ -5,6 +5,7 @@ Makefile.PL
 README
 Types.xs
 lib/Lexical/Types.pm
+ptable.h
 samples/basic.pl
 t/00-load.t
 t/10-base.t

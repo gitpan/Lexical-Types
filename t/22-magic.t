@@ -29,6 +29,7 @@ BEGIN {
 
 BEGIN {
  plan tests => 2 * 8;
+ defined and diag "Using Variable::Magic $_" for $Variable::Magic::VERSION;
 }
 
 use Lexical::Types as => 'Lexical::Types::Test';

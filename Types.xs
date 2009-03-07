@@ -6,6 +6,9 @@
 #include "perl.h"
 #include "XSUB.h"
 
+#define __PACKAGE__     "Lexical::Types"
+#define __PACKAGE_LEN__ (sizeof(__PACKAGE__)-1)
+
 /* --- Compatibility wrappers ---------------------------------------------- */
 
 #define LT_HAS_PERL(R, V, S) (PERL_REVISION > (R) || (PERL_REVISION == (R) && (PERL_VERSION > (V) || (PERL_VERSION == (V) && (PERL_SUBVERSION >= (S))))))
@@ -20,10 +23,6 @@
 # endif
 #endif
 
-#ifndef Newx
-# define Newx(v, n, c) New(0, v, n, c)
-#endif
-
 #ifndef HvNAME_get
 # define HvNAME_get(H) HvNAME(H)
 #endif
@@ -31,9 +30,6 @@
 #ifndef HvNAMELEN_get
 # define HvNAMELEN_get(H) strlen(HvNAME_get(H))
 #endif
-
-#define __PACKAGE__     "Lexical::Types"
-#define __PACKAGE_LEN__ (sizeof(__PACKAGE__)-1)
 
 /* --- Helpers ------------------------------------------------------------- */
 
@@ -61,10 +57,15 @@ STATIC SV *lt_hint(pTHX) {
 
 /* ... op => info map ...................................................... */
 
-#define OP2STR_BUF char buf[(CHAR_BIT * sizeof(UV)) / 2]
-#define OP2STR(O)  (sprintf(buf, "%"UVxf, PTR2UV(O)))
+#define PTABLE_VAL_FREE(V) PerlMemShared_free(V)
 
-STATIC HV *lt_op_map = NULL;
+#include "ptable.h"
+
+STATIC ptable *lt_op_map = NULL;
+
+#ifdef USE_ITHREADS
+STATIC perl_mutex lt_op_map_mutex;
+#endif
 
 typedef struct {
  SV *orig_pkg;
@@ -73,30 +74,46 @@ typedef struct {
  OP *(*pp_padsv)(pTHX);
 } lt_op_info;
 
-STATIC void lt_map_store(pTHX_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
-#define lt_map_store(O, P1, P2, M, PP) lt_map_store(aTHX_ (O), (P1), (P2), (M), (PP))
- OP2STR_BUF;
- SV *val;
+STATIC void lt_map_store(const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
  lt_op_info *oi;
 
- Newx(oi, 1, lt_op_info);
+#ifdef USE_ITHREADS
+ MUTEX_LOCK(&lt_op_map_mutex);
+#endif
+
+ if (!(oi = ptable_fetch(lt_op_map, o))) {
+  oi = PerlMemShared_malloc(sizeof *oi);
+  ptable_store(lt_op_map, o, oi);
+ }
+
  oi->orig_pkg  = orig_pkg;
  oi->type_pkg  = type_pkg;
  oi->type_meth = type_meth;
  oi->pp_padsv  = pp_padsv;
- val = newSVuv(PTR2UV(oi));
 
- (void)hv_store(lt_op_map, buf, OP2STR(o), val, 0);
+#ifdef USE_ITHREADS
+ MUTEX_UNLOCK(&lt_op_map_mutex);
+#endif
 }
 
-STATIC const lt_op_info *lt_map_fetch(pTHX_ const OP *o) {
-#define lt_map_fetch(O) lt_map_fetch(aTHX_ (O))
- OP2STR_BUF;
- SV **svp;
+STATIC const lt_op_info *lt_map_fetch(const OP *o, lt_op_info *oi) {
+ const lt_op_info *val;
 
- svp = hv_fetch(lt_op_map, buf, OP2STR(o), 0);
+#ifdef USE_ITHREADS
+ MUTEX_LOCK(&lt_op_map_mutex);
+#endif
 
- return svp ? INT2PTR(const lt_op_info *, SvUVX(*svp)) : NULL;
+ val = ptable_fetch(lt_op_map, o);
+ if (val) {
+  *oi = *val;
+  val = oi;
+ }
+
+#ifdef USE_ITHREADS
+ MUTEX_UNLOCK(&lt_op_map_mutex);
+#endif
+
+ return val;
 }
 
 /* --- Hooks --------------------------------------------------------------- */
@@ -104,9 +121,9 @@ STATIC const lt_op_info *lt_map_fetch(pTHX_ const OP *o) {
 /* ... Our pp_padsv ........................................................ */
 
 STATIC OP *lt_pp_padsv(pTHX) {
- const lt_op_info *oi;
+ lt_op_info oi;
 
- if ((PL_op->op_private & OPpLVAL_INTRO) && (oi = lt_map_fetch(PL_op))) {
+ if ((PL_op->op_private & OPpLVAL_INTRO) && lt_map_fetch(PL_op, &oi)) {
   PADOFFSET targ = PL_op->op_targ;
   SV *sv         = PAD_SVl(targ);
 
@@ -119,12 +136,12 @@ STATIC OP *lt_pp_padsv(pTHX) {
 
    PUSHMARK(SP);
    EXTEND(SP, 3);
-   PUSHs(oi->type_pkg);
+   PUSHs(oi.type_pkg);
    PUSHs(sv);
-   PUSHs(oi->orig_pkg);
+   PUSHs(oi.orig_pkg);
    PUTBACK;
 
-   items = call_sv(oi->type_meth, G_ARRAY | G_METHOD);
+   items = call_sv(oi.type_meth, G_ARRAY | G_METHOD);
 
    SPAGAIN;
    switch (items) {
@@ -142,7 +159,7 @@ STATIC OP *lt_pp_padsv(pTHX) {
    LEAVE;
   }
 
-  return CALL_FPTR(oi->pp_padsv)(aTHX);
+  return CALL_FPTR(oi.pp_padsv)(aTHX);
  }
 
  return CALL_FPTR(PL_ppaddr[OP_PADSV])(aTHX);
@@ -195,8 +212,8 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  if (stash && (hint = lt_hint())) {
   SV *orig_pkg  = newSVpvn(HvNAME_get(stash), HvNAMELEN_get(stash));
   SV *orig_meth = lt_default_meth;
-  SV *type_pkg  = orig_pkg;
-  SV *type_meth = orig_meth;
+  SV *type_pkg  = NULL;
+  SV *type_meth = NULL;
   SV *code      = INT2PTR(SV *, SvUVX(hint));
 
   SvREADONLY_on(orig_pkg);
@@ -243,8 +260,15 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
    LEAVE;
   }
 
-  if (type_meth == orig_meth)
+  if (!type_pkg) {
+   type_pkg = orig_pkg;
+   SvREFCNT_inc(orig_pkg);
+  }
+
+  if (!type_meth) {
+   type_meth = orig_meth;
    SvREFCNT_inc(orig_meth);
+  }
 
   lt_pp_padsv_save();
 
@@ -274,11 +298,15 @@ PROTOTYPES: DISABLE
 BOOT: 
 {                                    
  if (!lt_initialized++) {
+  lt_op_map = ptable_new();
+#ifdef USE_ITHREADS
+  MUTEX_INIT(&lt_op_map_mutex);
+#endif
+
   lt_default_meth = newSVpvn("TYPEDSCALAR", 11);
   SvREADONLY_on(lt_default_meth);
 
   PERL_HASH(lt_hash, __PACKAGE__, __PACKAGE_LEN__);
-  lt_op_map = newHV();
 
   lt_old_ck_padany    = PL_check[OP_PADANY];
   PL_check[OP_PADANY] = MEMBER_TO_FPTR(lt_ck_padany);

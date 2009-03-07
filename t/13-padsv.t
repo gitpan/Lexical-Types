@@ -3,7 +3,9 @@
 use strict;
 use warnings;
 
-use Test::More tests => 3;
+use Config qw/%Config/;
+
+use Test::More tests => 4;
 
 sub Str::TYPEDSCALAR {
  my $buf = (caller(0))[2];
@@ -24,4 +26,24 @@ sub Str::TYPEDSCALAR {
 
  my $z = 7;
  is $z, 7, 'trick for others';
+}
+
+my @lines;
+
+sub Int::TYPEDSCALAR { push @lines, (caller(0))[2]; () }
+
+SKIP: {
+ skip 'Broken with threaded perls before 5.8.4' => 1
+                                      if $Config{useithreads} and $] < 5.008004;
+
+ use Lexical::Types as => sub {
+  # In 5.10, this closure is compiled before hints are enabled, so no hintseval
+  # op is added at compile time to propagate the hints inside the eval.
+  # That's why we need to re-use Lexical::Types explicitely.
+  eval 'use Lexical::Types; my Int $x';
+  @_;
+ };
+
+ my Int $x;
+ is_deeply \@lines, [ 1, __LINE__-1 ], 'hooking inside the \'as\' callback';
 }

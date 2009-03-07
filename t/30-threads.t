@@ -15,15 +15,19 @@ BEGIN {
 
 use threads;
 
-use Test::More tests => 10 * 2 * (1 + 2);
+use Test::More tests => 10 * 2 * 2 * (1 + 2);
+
+defined and diag "Using threads $_" for $threads::VERSION;
 
 {
  package Lexical::Types::Test::Tag;
 
  sub TYPEDSCALAR {
   my $tid = threads->tid();
-  Test::More::is($_[0], __PACKAGE__, "base type is correct in thread $tid");
-  Test::More::is($_[2], 'Tag', "original type is correct in thread $tid");
+  my ($file, $line) = (caller(0))[1, 2];
+  my $where = "at $file line $line in thread $tid";
+  Test::More::is($_[0], __PACKAGE__, "base type is correct $where");
+  Test::More::is($_[2], 'Tag', "original type is correct $where");
   $_[1] = $tid;
   ();
  }
@@ -34,10 +38,18 @@ use Test::More tests => 10 * 2 * (1 + 2);
 use Lexical::Types as => 'Lexical::Types::Test::';
 
 sub try {
+ my $tid = threads->tid();
+
  for (1 .. 2) {
   my Tag $t;
-  my $tid = threads->tid();
   is $t, $tid, "typed lexical correctly initialized at run $_ in thread $tid";
+
+  eval <<'EVALD';
+   use Lexical::Types as => "Lexical::Types::Test::";
+   my Tag $t2;
+   is $t2, $tid, "typed lexical correctly initialized in eval at run $_ in thread $tid";
+EVALD
+  diag $@ if $@;
  }
 }
 

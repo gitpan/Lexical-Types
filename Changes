@@ -1,5 +1,12 @@
 Revision history for Lexical-Types
 
+0.04    2009-03-07 15:45 UTC
+        + Chg : Some implementation of pointer table is now used internally.
+                This should make thread safety more robust.
+        + Doc : Cleanups.
+        + Tst : Using Lexical::Types inside the 'as' callback.
+        + Tst : Thread safety.
+
 0.03    2009-03-05 21:15 UTC
         + Doc : Discuss about using constants for types.
         + Fix : The PL_ppaddr[OP_PADSV] localization logic was refined so that
