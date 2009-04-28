@@ -6,6 +6,18 @@
  * shared across threads.
  * Copyright goes to the original authors, bug reports to me. */
 
+#ifdef PERL_IMPLICIT_SYS
+# define pPTABLE  pTHX
+# define pPTABLE_ pTHX_
+# define aPTABLE  aTHX
+# define aPTABLE_ aTHX_
+#else
+# define pPTABLE
+# define pPTABLE_
+# define aPTABLE
+# define aPTABLE_
+#endif
+
 typedef struct ptable_ent {
  struct ptable_ent *next;
  const void *       key;
@@ -22,7 +34,8 @@ typedef struct ptable {
 # define PTABLE_VAL_FREE(V)
 #endif
 
-STATIC ptable *ptable_new(void) {
+STATIC ptable *ptable_new(pPTABLE) {
+#define ptable_new() ptable_new(aPTABLE)
  ptable *t = PerlMemShared_malloc(sizeof *t);
  t->max   = 127;
  t->items = 0;
@@ -52,7 +65,8 @@ STATIC void *ptable_fetch(const ptable * const t, const void * const key) {
  return ent ? ent->val : NULL;
 }
 
-STATIC void ptable_split(ptable * const t) {
+STATIC void ptable_split(pPTABLE_ ptable * const t) {
+#define ptable_split(T) ptable_split(aPTABLE_ (T))
  ptable_ent **ary = t->ary;
  const UV oldsize = t->max + 1;
  UV newsize = oldsize * 2;
@@ -80,7 +94,8 @@ STATIC void ptable_split(ptable * const t) {
  }
 }
 
-STATIC void ptable_store(ptable * const t, const void * const key, void * const val) {
+STATIC void ptable_store(pPTABLE_ ptable * const t, const void * const key, void * const val) {
+#define ptable_store(T, K, V) ptable_store(aPTABLE_ (T), (K), (V))
  ptable_ent *ent = ptable_find(t, key);
 
  if (ent) {
@@ -102,7 +117,8 @@ STATIC void ptable_store(ptable * const t, const void * const key, void * const 
 
 #if 0
 
-STATIC void ptable_clear(ptable * const t) {
+STATIC void ptable_clear(pPTABLE_ ptable * const t) {
+#define ptable_clear(T) ptable_clear(aPTABLE_ (T))
  if (t && t->items) {
   register ptable_ent ** const array = t->ary;
   UV i = t->max;
@@ -123,7 +139,8 @@ STATIC void ptable_clear(ptable * const t) {
  }
 }
 
-STATIC void ptable_free(ptable * const t) {
+STATIC void ptable_free(pPTABLE_ ptable * const t) {
+#define ptable_free(T) ptable_free(aPTABLE_ (T))
  if (!t)
   return;
  ptable_clear(t);

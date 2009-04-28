@@ -13,13 +13,13 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.04';
+ $VERSION = '0.05';
 }
 
 =head1 SYNOPSIS
@@ -246,20 +246,6 @@ If you prefer to use constants rather than creating empty packages, you can repl
     sub new { ... }
 
 =head1 CAVEATS
-
-For C<perl> to be able to parse C<my Str $x>, you need :
-
-=over 4
-
-=item *
-
-either the C<Str> package to be defined ;
-
-=item *
-
-or for C<Str> to be a constant sub returning a valid defined package.
-
-=back
 
 The restrictions on the type (being either a defined package name or a constant) apply even if you use the C<'as'> option to redirect to another package, and are unlikely to find a workaround as this happens deep inside the lexer - far from the reach of an extension.
 

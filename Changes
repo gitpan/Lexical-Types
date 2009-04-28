@@ -1,5 +1,9 @@
 Revision history for Lexical-Types
 
+0.05    2009-04-28 21:40 UTC
+        + Fix : Building with PERL_IMPLICIT_SYS set (especially on Win32).
+        + Tst : Dieing in callbacks.
+
 0.04    2009-03-07 15:45 UTC
         + Chg : Some implementation of pointer table is now used internally.
                 This should make thread safety more robust.

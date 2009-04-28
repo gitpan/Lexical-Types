@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 12 + 6;
+use Test::More tests => 14 + 6;
 
 {
  package Lexical::Types::Test::LTT;
@@ -22,6 +22,12 @@ use Test::More tests => 12 + 6;
  package Lexical::Types::Test::LTT2;
 
  sub TYPEDSCALAR { 1 .. 2 }
+}
+
+{
+ package Lexical::Types::Test::LTT3;
+
+ sub TYPEDSCALAR { die 'coconut' }
 }
 
 {
@@ -106,6 +112,27 @@ use Test::More tests => 12 + 6;
   my LTT $x;
  ];
  like $@, $expect, 'as => code, initializing by returning two scalars';
+}
+
+{
+ my $expect = qr/^banana at \(eval \d+\) line 2/;
+ diag 'This will throw two more warnings' if $] >= 5.008008 and $] < 5.009;
+ local $@;
+ eval q[
+  use Lexical::Types as => sub { die 'banana' };
+  my LTT $x;
+ ];
+ like $@, $expect, 'as => sub { die }';
+}
+
+{
+ my $expect = qr/^coconut at \Q$0\E line 30/;
+ local $@;
+ eval q[
+  use Lexical::Types;
+  my Lexical::Types::Test::LTT3 $x;
+ ];
+ like $@, $expect, 'die in TYPEDSCALAR';
 }
 
 my LTT $x;

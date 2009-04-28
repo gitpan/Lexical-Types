@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Lexical-Types
-version:            0.04
+version:            0.05
 abstract:           Extend the semantics of typed lexicals.
 author:
     - Vincent Pit <perl@profvince.com>
@@ -20,12 +20,12 @@ resources:
     bugtracker:  http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Lexical-Types
     homepage:    http://search.cpan.org/dist/Lexical-Types/
     license:     http://dev.perl.org/licenses/
-    repository:  http://git.profvince.com/perl/modules/Lexical-Types.git
+    repository:  http://git.profvince.com/?p=perl%2Fmodules%2FLexical-Types.git
 no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.48
+generated_by:       ExtUtils::MakeMaker version 6.50
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4

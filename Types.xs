@@ -74,7 +74,8 @@ typedef struct {
  OP *(*pp_padsv)(pTHX);
 } lt_op_info;
 
-STATIC void lt_map_store(const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
+STATIC void lt_map_store(pPTABLE_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
+#define lt_map_store(O, OP, TP, TM, PP) lt_map_store(aPTABLE_ (O), (OP), (TP), (TM), (PP))
  lt_op_info *oi;
 
 #ifdef USE_ITHREADS

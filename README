@@ -2,7 +2,7 @@ NAME
     Lexical::Types - Extend the semantics of typed lexicals.
 
 VERSION
-    Version 0.04
+    Version 0.05
 
 SYNOPSIS
         { package Str; }
@@ -172,12 +172,6 @@ INTEGRATION
         sub new { ... }
 
 CAVEATS
-    For "perl" to be able to parse "my Str $x", you need :
-
-    *   either the "Str" package to be defined ;
-
-    *   or for "Str" to be a constant sub returning a valid defined package.
-
     The restrictions on the type (being either a defined package name or a
     constant) apply even if you use the 'as' option to redirect to another
     package, and are unlikely to find a workaround as this happens deep
