@@ -1,5 +1,11 @@
 Revision history for Lexical-Types
 
+0.06    2009-05-01 19:00 UTC
+        + Fix : The pragma now properly propagates into threaded eval STRING,
+                effectively making the module thread safe. The new LT_THREADSAFE
+                constant can be used to know whether the module could have been
+                built with thread safety features enabled.
+
 0.05    2009-04-28 21:40 UTC
         + Fix : Building with PERL_IMPLICIT_SYS set (especially on Win32).
         + Tst : Dieing in callbacks.

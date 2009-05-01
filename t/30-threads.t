@@ -15,9 +15,17 @@ BEGIN {
 
 use threads;
 
-use Test::More tests => 10 * 2 * 2 * (1 + 2);
+use Test::More;
 
-defined and diag "Using threads $_" for $threads::VERSION;
+BEGIN {
+ require Lexical::Types;
+ if (Lexical::Types::LT_THREADSAFE()) {
+  plan tests => 10 * 2 * 3 * (1 + 2);
+  defined and diag "Using threads $_" for $threads::VERSION;
+ } else {
+  plan skip_all => 'This Lexical::Types isn\'t thread safe';
+ }
+}
 
 {
  package Lexical::Types::Test::Tag;
@@ -50,6 +58,16 @@ sub try {
    is $t2, $tid, "typed lexical correctly initialized in eval at run $_ in thread $tid";
 EVALD
   diag $@ if $@;
+
+SKIP:
+  {
+   skip 'Hints aren\'t propagated into eval STRING below perl 5.10' => 3
+                                                             unless $] >= 5.010;
+   eval <<'EVALD';
+    my Tag $t3;
+    is $t3, $tid, "typed lexical correctly initialized in eval (propagated) at run $_ in thread $tid"
+EVALD
+  }
  }
 }
 

@@ -13,13 +13,13 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.05
+Version 0.06
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.05';
+ $VERSION = '0.06';
 }
 
 =head1 SYNOPSIS
@@ -244,6 +244,12 @@ If you prefer to use constants rather than creating empty packages, you can repl
     package MyTypes::Int;
 
     sub new { ... }
+
+=head1 CONSTANTS
+
+=head2 C<LT_THREADSAFE>
+
+True iff the module could have been built when thread-safety features.
 
 =head1 CAVEATS
 

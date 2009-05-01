@@ -6,47 +6,95 @@
  * shared across threads.
  * Copyright goes to the original authors, bug reports to me. */
 
+/* This header is designed to be included several times with different
+ * definitions for PTABLE_NAME and PTABLE_VAL_FREE(). */
+
+#undef pPTBLMS
+#undef pPTBLMS_
+#undef aPTBLMS
+#undef aPTBLMS_
+
+/* Context for PerlMemShared_* functions */
+
 #ifdef PERL_IMPLICIT_SYS
-# define pPTABLE  pTHX
-# define pPTABLE_ pTHX_
-# define aPTABLE  aTHX
-# define aPTABLE_ aTHX_
+# define pPTBLMS  pTHX
+# define pPTBLMS_ pTHX_
+# define aPTBLMS  aTHX
+# define aPTBLMS_ aTHX_
 #else
-# define pPTABLE
-# define pPTABLE_
-# define aPTABLE
-# define aPTABLE_
+# define pPTBLMS
+# define pPTBLMS_
+# define aPTBLMS
+# define aPTBLMS_
 #endif
 
-typedef struct ptable_ent {
- struct ptable_ent *next;
- const void *       key;
- void *             val;
-} ptable_ent;
+#ifndef pPTBL
+# define pPTBL  pPTBLMS
+#endif
+#ifndef pPTBL_
+# define pPTBL_ pPTBLMS_
+#endif
+#ifndef aPTBL
+# define aPTBL  aPTBLMS
+#endif
+#ifndef aPTBL_
+# define aPTBL_ aPTBLMS_
+#endif
 
-typedef struct ptable {
- ptable_ent **ary;
- UV           max;
- UV           items;
-} ptable;
+#ifndef PTABLE_NAME
+# define PTABLE_NAME ptable
+#endif
 
 #ifndef PTABLE_VAL_FREE
 # define PTABLE_VAL_FREE(V)
 #endif
 
-STATIC ptable *ptable_new(pPTABLE) {
-#define ptable_new() ptable_new(aPTABLE)
+#ifndef PTABLE_JOIN
+# define PTABLE_PASTE(A, B) A ## B
+# define PTABLE_JOIN(A, B)  PTABLE_PASTE(A, B)
+#endif
+
+#ifndef PTABLE_PREFIX
+# define PTABLE_PREFIX(X) PTABLE_JOIN(PTABLE_NAME, X)
+#endif
+
+#ifndef ptable_ent
+typedef struct ptable_ent {
+ struct ptable_ent *next;
+ const void *       key;
+ void *             val;
+} ptable_ent;
+#define ptable_ent ptable_ent
+#endif /* !ptable_ent */
+
+#ifndef ptable
+typedef struct ptable {
+ ptable_ent **ary;
+ UV           max;
+ UV           items;
+} ptable;
+#define ptable ptable
+#endif /* !ptable */
+
+#ifndef ptable_new
+STATIC ptable *ptable_new(pPTBLMS) {
+#define ptable_new() ptable_new(aPTBLMS)
  ptable *t = PerlMemShared_malloc(sizeof *t);
  t->max   = 127;
  t->items = 0;
  t->ary   = PerlMemShared_calloc(t->max + 1, sizeof *t->ary);
  return t;
 }
+#endif /* !ptable_new */
 
-#define PTABLE_HASH(ptr) \
-  ((PTR2UV(ptr) >> 3) ^ (PTR2UV(ptr) >> (3 + 7)) ^ (PTR2UV(ptr) >> (3 + 17)))
+#ifndef PTABLE_HASH
+# define PTABLE_HASH(ptr) \
+     ((PTR2UV(ptr) >> 3) ^ (PTR2UV(ptr) >> (3 + 7)) ^ (PTR2UV(ptr) >> (3 + 17)))
+#endif
 
+#ifndef ptable_find
 STATIC ptable_ent *ptable_find(const ptable * const t, const void * const key) {
+#define ptable_find ptable_find
  ptable_ent *ent;
  const UV hash = PTABLE_HASH(key);
 
@@ -58,15 +106,20 @@ STATIC ptable_ent *ptable_find(const ptable * const t, const void * const key) {
 
  return NULL;
 }
+#endif /* !ptable_find */
 
+#ifndef ptable_fetch
 STATIC void *ptable_fetch(const ptable * const t, const void * const key) {
+#define ptable_fetch ptable_fetch
  const ptable_ent *const ent = ptable_find(t, key);
 
  return ent ? ent->val : NULL;
 }
+#endif /* !ptable_fetch */
 
-STATIC void ptable_split(pPTABLE_ ptable * const t) {
-#define ptable_split(T) ptable_split(aPTABLE_ (T))
+#ifndef ptable_split
+STATIC void ptable_split(pPTBLMS_ ptable * const t) {
+#define ptable_split(T) ptable_split(aPTBLMS_ (T))
  ptable_ent **ary = t->ary;
  const UV oldsize = t->max + 1;
  UV newsize = oldsize * 2;
@@ -93,9 +146,9 @@ STATIC void ptable_split(pPTABLE_ ptable * const t) {
   }
  }
 }
+#endif /* !ptable_split */
 
-STATIC void ptable_store(pPTABLE_ ptable * const t, const void * const key, void * const val) {
-#define ptable_store(T, K, V) ptable_store(aPTABLE_ (T), (K), (V))
+STATIC void PTABLE_PREFIX(_store)(pPTBL_ ptable * const t, const void * const key, void * const val) {
  ptable_ent *ent = ptable_find(t, key);
 
  if (ent) {
@@ -115,10 +168,22 @@ STATIC void ptable_store(pPTABLE_ ptable * const t, const void * const key, void
  }
 }
 
-#if 0
+#ifndef ptable_walk
+STATIC void ptable_walk(pTHX_ ptable * const t, void (*cb)(pTHX_ ptable_ent *ent, void *userdata), void *userdata) {
+#define ptable_walk(T, CB, UD) ptable_walk(aTHX_ (T), (CB), (UD))
+ if (t && t->items) {
+  register ptable_ent ** const array = t->ary;
+  UV i = t->max;
+  do {
+   ptable_ent *entry;
+   for (entry = array[i]; entry; entry = entry->next)
+    cb(aTHX_ entry, userdata);
+  } while (i--);
+ }
+}
+#endif /* !ptable_walk */
 
-STATIC void ptable_clear(pPTABLE_ ptable * const t) {
-#define ptable_clear(T) ptable_clear(aPTABLE_ (T))
+STATIC void PTABLE_PREFIX(_clear)(pPTBL_ ptable * const t) {
  if (t && t->items) {
   register ptable_ent ** const array = t->ary;
   UV i = t->max;
@@ -130,7 +195,7 @@ STATIC void ptable_clear(pPTABLE_ ptable * const t) {
     void *val = oentry->val;
     entry = entry->next;
     PTABLE_VAL_FREE(val);
-    PerlMemShared_free(entry);
+    PerlMemShared_free(oentry);
    }
    array[i] = NULL;
   } while (i--);
@@ -139,13 +204,13 @@ STATIC void ptable_clear(pPTABLE_ ptable * const t) {
  }
 }
 
-STATIC void ptable_free(pPTABLE_ ptable * const t) {
-#define ptable_free(T) ptable_free(aPTABLE_ (T))
+STATIC void PTABLE_PREFIX(_free)(pPTBL_ ptable * const t) {
  if (!t)
   return;
- ptable_clear(t);
+ PTABLE_PREFIX(_clear)(aPTBL_ t);
  PerlMemShared_free(t->ary);
  PerlMemShared_free(t);
 }
 
-#endif
+#undef PTABLE_NAME
+#undef PTABLE_VAL_FREE
