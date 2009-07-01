@@ -2,7 +2,7 @@ NAME
     Lexical::Types - Extend the semantics of typed lexicals.
 
 VERSION
-    Version 0.06
+    Version 0.07
 
 SYNOPSIS
         { package Str; }
@@ -173,7 +173,8 @@ INTEGRATION
 
 CONSTANTS
   "LT_THREADSAFE"
-    True iff the module could have been built when thread-safety features.
+    True iff the module could have been built with thread-safety features
+    enabled.
 
 CAVEATS
     The restrictions on the type (being either a defined package name or a
@@ -183,6 +184,15 @@ CAVEATS
 
     Only one mangler or prefix can be in use at the same time in a given
     scope.
+
+    The implementation was tweaked to work around several limitations of
+    vanilla "perl" pragmas : it's thread safe, and doesn't suffer from a
+    "perl 5.8.x-5.10.0" bug that causes all pragmas to propagate into
+    "require"d scopes.
+
+    With 5.8 perls, the pragma does not propagate into "eval STRING". This
+    is due to a shortcoming in the way perl handles the hints hash, which is
+    addressed in perl 5.10.
 
 DEPENDENCIES
     perl 5.8, XSLoader.

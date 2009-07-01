@@ -13,13 +13,13 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.06
+Version 0.07
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.06';
+ $VERSION = '0.07';
 }
 
 =head1 SYNOPSIS
@@ -155,7 +155,7 @@ sub import {
    croak "Invalid $r reference for 'as'";
   }
  } else {
-  $hint = _tag(0);
+  $hint = _tag(sub { @_ });
  }
 
  $^H |= 0x020000;
@@ -249,13 +249,18 @@ If you prefer to use constants rather than creating empty packages, you can repl
 
 =head2 C<LT_THREADSAFE>
 
-True iff the module could have been built when thread-safety features.
+True iff the module could have been built with thread-safety features enabled.
 
 =head1 CAVEATS
 
 The restrictions on the type (being either a defined package name or a constant) apply even if you use the C<'as'> option to redirect to another package, and are unlikely to find a workaround as this happens deep inside the lexer - far from the reach of an extension.
 
 Only one mangler or prefix can be in use at the same time in a given scope.
+
+The implementation was tweaked to work around several limitations of vanilla C<perl> pragmas : it's thread safe, and doesn't suffer from a C<perl 5.8.x-5.10.0> bug that causes all pragmas to propagate into C<require>d scopes.
+
+With 5.8 perls, the pragma does not propagate into C<eval STRING>.
+This is due to a shortcoming in the way perl handles the hints hash, which is addressed in perl 5.10.
 
 =head1 DEPENDENCIES
 

@@ -1,4 +1,4 @@
-/* This file is part of the Lexical-Types Perl module.
+/* This file is part of the Lexical::Types Perl module.
  * See http://search.cpan.org/dist/Lexical-Types/ */
 
 /* This is a pointer table implementation essentially copied from the ptr_table
@@ -155,7 +155,7 @@ STATIC void PTABLE_PREFIX(_store)(pPTBL_ ptable * const t, const void * const ke
   void *oldval = ent->val;
   PTABLE_VAL_FREE(oldval);
   ent->val = val;
- } else {
+ } else if (val) {
   const UV i = PTABLE_HASH(key) & t->max;
   ent = PerlMemShared_malloc(sizeof *ent);
   ent->key  = key;
@@ -211,6 +211,11 @@ STATIC void PTABLE_PREFIX(_free)(pPTBL_ ptable * const t) {
  PerlMemShared_free(t->ary);
  PerlMemShared_free(t);
 }
+
+#undef pPTBL
+#undef pPTBL_
+#undef aPTBL
+#undef aPTBL_
 
 #undef PTABLE_NAME
 #undef PTABLE_VAL_FREE

@@ -23,6 +23,10 @@
 # endif
 #endif
 
+#ifndef LT_WORKAROUND_REQUIRE_PROPAGATION
+# define LT_WORKAROUND_REQUIRE_PROPAGATION !LT_HAS_PERL(5, 10, 1)
+#endif
+
 #ifndef HvNAME_get
 # define HvNAME_get(H) HvNAME(H)
 #endif
@@ -59,16 +63,35 @@
 # endif
 #else
 # define LT_THREADSAFE 0
+# undef  dMY_CXT
+# define dMY_CXT      dNOOP
+# undef  MY_CXT
+# define MY_CXT       lt_globaldata
+# undef  START_MY_CXT
+# define START_MY_CXT STATIC my_cxt_t MY_CXT;
+# undef  MY_CXT_INIT
+# define MY_CXT_INIT  NOOP
+# undef  MY_CXT_CLONE
+# define MY_CXT_CLONE NOOP
 #endif
 
 /* --- Helpers ------------------------------------------------------------- */
 
 /* ... Thread-safe hints ................................................... */
 
-#if LT_THREADSAFE
+/* If any of those is true, we need to store the hint in a global table. */
+
+#if LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION
+
+typedef struct {
+ SV *code;
+#if LT_WORKAROUND_REQUIRE_PROPAGATION
+ UV  requires;
+#endif
+} lt_hint_t;
 
 #define PTABLE_NAME        ptable_hints
-#define PTABLE_VAL_FREE(V) if ((V) && !SvIS_FREED((SV *) (V))) SvREFCNT_dec(V)
+#define PTABLE_VAL_FREE(V) { lt_hint_t *h = (V); SvREFCNT_dec(h->code); PerlMemShared_free(h); }
 
 #define pPTBL  pTHX
 #define pPTBL_ pTHX_
@@ -77,41 +100,51 @@
 
 #include "ptable.h"
 
+#define ptable_hints_store(T, K, V) ptable_hints_store(aTHX_ (T), (K), (V))
+#define ptable_hints_free(T)        ptable_hints_free(aTHX_ (T))
+
 #define MY_CXT_KEY __PACKAGE__ "::_guts" XS_VERSION
 
 typedef struct {
- ptable *tbl;
+ ptable *tbl; /* It really is a ptable_hints */
+#if LT_THREADSAFE
  tTHX    owner;
+#endif
 } my_cxt_t;
 
 START_MY_CXT
 
+#if LT_THREADSAFE
+
 STATIC void lt_ptable_hints_clone(pTHX_ ptable_ent *ent, void *ud_) {
- my_cxt_t *ud  = ud_;
- SV       *val = ent->val;
+ my_cxt_t  *ud  = ud_;
+ lt_hint_t *h1 = ent->val;
+ lt_hint_t *h2 = PerlMemShared_malloc(sizeof *h2);
+
+ *h2 = *h1;
 
  if (ud->owner != aTHX) {
+  SV *val = h1->code;
   CLONE_PARAMS param;
   AV *stashes = (SvTYPE(val) == SVt_PVHV && HvNAME_get(val)) ? newAV() : NULL;
   param.stashes    = stashes;
   param.flags      = 0;
   param.proto_perl = ud->owner;
-  val = sv_dup(val, &param);
+  h2->code = sv_dup(val, &param);
   if (stashes) {
    av_undef(stashes);
    SvREFCNT_dec(stashes);
   }
  }
 
- ptable_hints_store(aPTBL_ ud->tbl, ent->key, val);
- SvREFCNT_inc(val);
+ ptable_hints_store(ud->tbl, ent->key, h2);
+ SvREFCNT_inc(h2->code);
 }
 
 STATIC void lt_thread_cleanup(pTHX_ void *);
 
 STATIC void lt_thread_cleanup(pTHX_ void *ud) {
  int *level = ud;
- SV  *id;
 
  if (*level) {
   *level = 0;
@@ -121,39 +154,80 @@ STATIC void lt_thread_cleanup(pTHX_ void *ud) {
  } else {
   dMY_CXT;
   PerlMemShared_free(level);
-  ptable_hints_free(aPTBL_ MY_CXT.tbl);
+  ptable_hints_free(MY_CXT.tbl);
  }
 }
 
-STATIC SV *lt_tag(pPTBL_ SV *value) {
-#define lt_tag(V) lt_tag(aPTBL_ (V))
+#endif /* LT_THREADSAFE */
+
+STATIC SV *lt_tag(pTHX_ SV *value) {
+#define lt_tag(V) lt_tag(aTHX_ (V))
+ lt_hint_t *h;
  dMY_CXT;
 
  value = SvOK(value) && SvROK(value) ? SvRV(value) : NULL;
+
+ h = PerlMemShared_malloc(sizeof *h);
+ h->code = SvREFCNT_inc(value);
+
+#if LT_WORKAROUND_REQUIRE_PROPAGATION
+ {
+  const PERL_SI *si;
+  UV             requires = 0;
+
+  for (si = PL_curstackinfo; si; si = si->si_prev) {
+   I32 cxix;
+
+   for (cxix = si->si_cxix; cxix >= 0; --cxix) {
+    const PERL_CONTEXT *cx = si->si_cxstack + cxix;
+
+    if (CxTYPE(cx) == CXt_EVAL && cx->blk_eval.old_op_type == OP_REQUIRE)
+     ++requires;
+   }
+  }
+
+  h->requires = requires;
+ }
+#endif
+
  /* We only need for the key to be an unique tag for looking up the value later.
   * Allocated memory provides convenient unique identifiers, so that's why we
   * use the value pointer as the key itself. */
- ptable_hints_store(aPTBL_ MY_CXT.tbl, value, value);
- SvREFCNT_inc(value);
+ ptable_hints_store(MY_CXT.tbl, value, h);
 
  return newSVuv(PTR2UV(value));
 }
 
 STATIC SV *lt_detag(pTHX_ const SV *hint) {
 #define lt_detag(H) lt_detag(aTHX_ (H))
- void *tag;
- SV   *value;
+ lt_hint_t *h;
+ dMY_CXT;
 
- if (!hint || !SvOK(hint) || !SvIOK(hint))
-  croak("Wrong hint");
+ if (!(hint && SvOK(hint) && SvIOK(hint)))
+  return NULL;
 
- tag = INT2PTR(void *, SvIVX(hint));
+ h = ptable_fetch(MY_CXT.tbl, INT2PTR(void *, SvUVX(hint)));
+
+#if LT_WORKAROUND_REQUIRE_PROPAGATION
  {
-  dMY_CXT;
-  value = ptable_fetch(MY_CXT.tbl, tag);
- }
+  const PERL_SI *si;
+  UV             requires = 0;
 
- return value;
+  for (si = PL_curstackinfo; si; si = si->si_prev) {
+   I32 cxix;
+
+   for (cxix = si->si_cxix; cxix >= 0; --cxix) {
+    const PERL_CONTEXT *cx = si->si_cxstack + cxix;
+
+    if (CxTYPE(cx) == CXt_EVAL && cx->blk_eval.old_op_type == OP_REQUIRE
+                               && ++requires > h->requires)
+     return NULL;
+   }
+  }
+ }
+#endif
+
+ return h->code;
 }
 
 #else
@@ -171,35 +245,39 @@ STATIC SV *lt_tag(pTHX_ SV *value) {
  return newSVuv(tag);
 }
 
-#define lt_detag(H) INT2PTR(SV *, SvUVX(H))
+#define lt_detag(H) (((H) && SvOK(H)) ? INT2PTR(SV *, SvUVX(H)) : NULL)
 
-#endif /* LT_THREADSAFE */
+#endif /* LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION */
 
 STATIC U32 lt_hash = 0;
 
 STATIC SV *lt_hint(pTHX) {
 #define lt_hint() lt_hint(aTHX)
- SV *id;
-#if LT_HAS_PERL(5, 10, 0)
- id = Perl_refcounted_he_fetch(aTHX_ PL_curcop->cop_hints_hash,
-                                     NULL,
-                                     __PACKAGE__, __PACKAGE_LEN__,
-                                     0,
-                                     lt_hash);
+ SV *hint;
+#if LT_HAS_PERL(5, 9, 5)
+ hint = Perl_refcounted_he_fetch(aTHX_ PL_curcop->cop_hints_hash,
+                                       NULL,
+                                       __PACKAGE__, __PACKAGE_LEN__,
+                                       0,
+                                       lt_hash);
 #else
  SV **val = hv_fetch(GvHV(PL_hintgv), __PACKAGE__, __PACKAGE_LEN__, lt_hash);
  if (!val)
   return 0;
- id = *val;
+ hint = *val;
 #endif
- return (id && SvOK(id)) ? id : NULL;
+ return lt_detag(hint);
 }
 
 /* ... op => info map ...................................................... */
 
+#define PTABLE_NAME        ptable_map
 #define PTABLE_VAL_FREE(V) PerlMemShared_free(V)
 
 #include "ptable.h"
+
+/* PerlMemShared_free() needs the [ap]PTBLMS_? default values */
+#define ptable_map_store(T, K, V) ptable_map_store(aPTBLMS_ (T), (K), (V))
 
 STATIC ptable *lt_op_map = NULL;
 
@@ -214,8 +292,8 @@ typedef struct {
  OP *(*pp_padsv)(pTHX);
 } lt_op_info;
 
-STATIC void lt_map_store(pPTBL_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
-#define lt_map_store(O, OP, TP, TM, PP) lt_map_store(aPTBL_ (O), (OP), (TP), (TM), (PP))
+STATIC void lt_map_store(pPTBLMS_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
+#define lt_map_store(O, OP, TP, TM, PP) lt_map_store(aPTBLMS_ (O), (OP), (TP), (TM), (PP))
  lt_op_info *oi;
 
 #ifdef USE_ITHREADS
@@ -224,7 +302,7 @@ STATIC void lt_map_store(pPTBL_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *typ
 
  if (!(oi = ptable_fetch(lt_op_map, o))) {
   oi = PerlMemShared_malloc(sizeof *oi);
-  ptable_store(aPTBL_ lt_op_map, o, oi);
+  ptable_map_store(lt_op_map, o, oi);
  }
 
  oi->orig_pkg  = orig_pkg;
@@ -255,6 +333,19 @@ STATIC const lt_op_info *lt_map_fetch(const OP *o, lt_op_info *oi) {
 #endif
 
  return val;
+}
+
+STATIC void lt_map_delete(pTHX_ const OP *o) {
+#define lt_map_delete(O) lt_map_delete(aTHX_ (O))
+#ifdef USE_ITHREADS
+ MUTEX_LOCK(&lt_op_map_mutex);
+#endif
+
+ ptable_map_store(lt_op_map, o, NULL);
+
+#ifdef USE_ITHREADS
+ MUTEX_UNLOCK(&lt_op_map_mutex);
+#endif
 }
 
 /* --- Hooks --------------------------------------------------------------- */
@@ -343,63 +434,60 @@ STATIC OP *(*lt_old_ck_padany)(pTHX_ OP *) = 0;
 
 STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  HV *stash;
- SV *hint;
+ SV *code;
 
  lt_pp_padsv_restore(o);
 
  o = CALL_FPTR(lt_old_ck_padany)(aTHX_ o);
 
  stash = PL_in_my_stash;
- if (stash && (hint = lt_hint())) {
+ if (stash && (code = lt_hint())) {
   SV *orig_pkg  = newSVpvn(HvNAME_get(stash), HvNAMELEN_get(stash));
   SV *orig_meth = lt_default_meth;
   SV *type_pkg  = NULL;
   SV *type_meth = NULL;
-  SV *code      = lt_detag(hint);
+  int items;
+
+  dSP;
 
   SvREADONLY_on(orig_pkg);
 
-  if (code) {
-   int items;
-   dSP;
+  ENTER;
+  SAVETMPS;
 
-   ENTER;
-   SAVETMPS;
+  PUSHMARK(SP);
+  EXTEND(SP, 2);
+  PUSHs(orig_pkg);
+  PUSHs(orig_meth);
+  PUTBACK;
 
-   PUSHMARK(SP);
-   EXTEND(SP, 2);
-   PUSHs(orig_pkg);
-   PUSHs(orig_meth);
-   PUTBACK;
+  items = call_sv(code, G_ARRAY);
 
-   items = call_sv(code, G_ARRAY);
-
-   SPAGAIN;
-   if (items > 2)
-    croak(__PACKAGE__ " mangler should return zero, one or two scalars, but got %d", items);
-   if (items == 0) {
-    SvREFCNT_dec(orig_pkg);
-    goto skip;
-   } else {
-    SV *rsv;
-    if (items > 1) {
-     rsv = POPs;
-     if (SvOK(rsv)) {
-      type_meth = newSVsv(rsv);
-      SvREADONLY_on(type_meth);
-     }
-    }
+  SPAGAIN;
+  if (items > 2)
+   croak(__PACKAGE__ " mangler should return zero, one or two scalars, but got %d", items);
+  if (items == 0) {
+   SvREFCNT_dec(orig_pkg);
+   goto skip;
+  } else {
+   SV *rsv;
+   if (items > 1) {
     rsv = POPs;
     if (SvOK(rsv)) {
-     type_pkg = newSVsv(rsv);
-     SvREADONLY_on(type_pkg);
+     type_meth = newSVsv(rsv);
+     SvREADONLY_on(type_meth);
     }
    }
-   PUTBACK;
-
-   FREETMPS;
-   LEAVE;
+   rsv = POPs;
+   if (SvOK(rsv)) {
+    type_pkg = newSVsv(rsv);
+    SvREADONLY_on(type_pkg);
+   }
   }
+  PUTBACK;
+
+  FREETMPS;
+  LEAVE;
 
   if (!type_pkg) {
    type_pkg = orig_pkg;
@@ -414,9 +502,11 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
   lt_pp_padsv_save();
 
   lt_map_store(o, orig_pkg, type_pkg, type_meth, lt_pp_padsv_saved);
+ } else {
+skip:
+  lt_map_delete(o);
  }
 
-skip:
  return o;
 }
 
@@ -424,6 +514,8 @@ STATIC OP *(*lt_old_ck_padsv)(pTHX_ OP *) = 0;
 
 STATIC OP *lt_ck_padsv(pTHX_ OP *o) {
  lt_pp_padsv_restore(o);
+
+ lt_map_delete(o);
 
  return CALL_FPTR(lt_old_ck_padsv)(aTHX_ o);
 }
@@ -440,9 +532,11 @@ BOOT:
 {                                    
  if (!lt_initialized++) {
   HV *stash;
-#if LT_THREADSAFE
+#if LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION
   MY_CXT_INIT;
   MY_CXT.tbl   = ptable_new();
+#endif
+#if LT_THREADSAFE
   MY_CXT.owner = aTHX;
 #endif
 
