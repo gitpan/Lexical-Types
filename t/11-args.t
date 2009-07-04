@@ -10,6 +10,7 @@ use Test::More tests => 14 + 6;
 
  sub TYPEDSCALAR {
   $_[1] = (caller(0))[2];
+  local $Test::Builder::Level = $Test::Builder::Level + 1;
   Test::More::is($_[2], 'LTT', 'original type is ok');
   ();
  }
@@ -126,7 +127,7 @@ use Test::More tests => 14 + 6;
 }
 
 {
- my $expect = qr/^coconut at \Q$0\E line 30/;
+ my $expect = qr/^coconut at \Q$0\E line 31/;
  local $@;
  eval q[
   use Lexical::Types;

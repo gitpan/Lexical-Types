@@ -48,6 +48,7 @@ sub check (&$$;$) {
   } else {
    eval { $test->() };
   }
+  local $Test::Builder::Level = $Test::Builder::Level + 1;
   is_deeply $got, $exp, $desc;
  }
  return $want ? @ret : $ret[0];

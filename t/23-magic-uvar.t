@@ -6,8 +6,8 @@ use warnings;
 use Test::More;
 
 BEGIN {
- plan skip_all => 'Variable::Magic 0.08 on 5.10 required to test uvar magic'
-              unless eval "use Variable::Magic 0.08; Variable::Magic::VMG_UVAR";
+ plan skip_all => 'Variable::Magic 0.35 on 5.10 required to test uvar magic'
+              unless eval "use Variable::Magic 0.35; Variable::Magic::VMG_UVAR";
 }
 
 {
@@ -53,6 +53,7 @@ sub check (&$$;$) {
   } else {
    eval { $test->() };
   }
+  local $Test::Builder::Level = $Test::Builder::Level + 1;
   is_deeply $got, $exp, $desc;
  }
  return $want ? @ret : $ret[0];

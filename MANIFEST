@@ -20,6 +20,7 @@ t/21-tie.t
 t/22-magic.t
 t/23-magic-uvar.t
 t/30-threads.t
+t/40-stress.t
 t/91-pod.t
 t/92-pod-coverage.t
 t/95-portability-files.t

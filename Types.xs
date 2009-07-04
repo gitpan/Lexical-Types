@@ -73,6 +73,14 @@
 # define MY_CXT_INIT  NOOP
 # undef  MY_CXT_CLONE
 # define MY_CXT_CLONE NOOP
+# undef  pMY_CXT
+# define pMY_CXT
+# undef  pMY_CXT_
+# define pMY_CXT_
+# undef  aMY_CXT
+# define aMY_CXT
+# undef  aMY_CXT_
+# define aMY_CXT_
 #endif
 
 /* --- Helpers ------------------------------------------------------------- */
@@ -103,18 +111,51 @@ typedef struct {
 #define ptable_hints_store(T, K, V) ptable_hints_store(aTHX_ (T), (K), (V))
 #define ptable_hints_free(T)        ptable_hints_free(aTHX_ (T))
 
+#endif /* LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION */
+
+/* ... Global data ......................................................... */
+
 #define MY_CXT_KEY __PACKAGE__ "::_guts" XS_VERSION
 
 typedef struct {
+#if LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION
  ptable *tbl; /* It really is a ptable_hints */
+#endif
 #if LT_THREADSAFE
  tTHX    owner;
 #endif
+ SV     *default_meth;
+ OP *  (*pp_padsv_saved)(pTHX);
 } my_cxt_t;
 
 START_MY_CXT
 
+/* ... Cloning global data ................................................. */
+
 #if LT_THREADSAFE
+
+STATIC SV *lt_clone(pTHX_ SV *sv, tTHX owner) {
+#define lt_clone(S, O) lt_clone(aTHX_ (S), (O))
+ CLONE_PARAMS  param;
+ AV           *stashes = NULL;
+ SV           *dupsv;
+
+ if (SvTYPE(sv) == SVt_PVHV && HvNAME_get(sv))
+  stashes = newAV();
+
+ param.stashes    = stashes;
+ param.flags      = 0;
+ param.proto_perl = owner;
+
+ dupsv = sv_dup(sv, &param);
+
+ if (stashes) {
+  av_undef(stashes);
+  SvREFCNT_dec(stashes);
+ }
+
+ return SvREFCNT_inc(dupsv);
+}
 
 STATIC void lt_ptable_hints_clone(pTHX_ ptable_ent *ent, void *ud_) {
  my_cxt_t  *ud  = ud_;
@@ -123,19 +164,8 @@ STATIC void lt_ptable_hints_clone(pTHX_ ptable_ent *ent, void *ud_) {
 
  *h2 = *h1;
 
- if (ud->owner != aTHX) {
-  SV *val = h1->code;
-  CLONE_PARAMS param;
-  AV *stashes = (SvTYPE(val) == SVt_PVHV && HvNAME_get(val)) ? newAV() : NULL;
-  param.stashes    = stashes;
-  param.flags      = 0;
-  param.proto_perl = ud->owner;
-  h2->code = sv_dup(val, &param);
-  if (stashes) {
-   av_undef(stashes);
-   SvREFCNT_dec(stashes);
-  }
- }
+ if (ud->owner != aTHX)
+  h2->code = lt_clone(h1->code, ud->owner);
 
  ptable_hints_store(ud->tbl, ent->key, h2);
  SvREFCNT_inc(h2->code);
@@ -159,6 +189,10 @@ STATIC void lt_thread_cleanup(pTHX_ void *ud) {
 }
 
 #endif /* LT_THREADSAFE */
+
+/* ... Hint tags ........................................................... */
+
+#if LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION
 
 STATIC SV *lt_tag(pTHX_ SV *value) {
 #define lt_tag(V) lt_tag(aTHX_ (V))
@@ -286,14 +320,19 @@ STATIC perl_mutex lt_op_map_mutex;
 #endif
 
 typedef struct {
+#ifdef MULTIPLICITY
+ STRLEN buf_size, orig_pkg_len, type_pkg_len, type_meth_len;
+ char *buf;
+#else /* MULTIPLICITY */
  SV *orig_pkg;
  SV *type_pkg;
  SV *type_meth;
+#endif /* !MULTIPLICITY */
  OP *(*pp_padsv)(pTHX);
 } lt_op_info;
 
-STATIC void lt_map_store(pPTBLMS_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
-#define lt_map_store(O, OP, TP, TM, PP) lt_map_store(aPTBLMS_ (O), (OP), (TP), (TM), (PP))
+STATIC void lt_map_store(pTHX_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*pp_padsv)(pTHX)) {
+#define lt_map_store(O, OP, TP, TM, PP) lt_map_store(aTHX_ (O), (OP), (TP), (TM), (PP))
  lt_op_info *oi;
 
 #ifdef USE_ITHREADS
@@ -303,11 +342,48 @@ STATIC void lt_map_store(pPTBLMS_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *t
  if (!(oi = ptable_fetch(lt_op_map, o))) {
   oi = PerlMemShared_malloc(sizeof *oi);
   ptable_map_store(lt_op_map, o, oi);
+#ifdef MULTIPLICITY
+  oi->buf      = NULL;
+  oi->buf_size = 0;
+#else /* MULTIPLICITY */
+ } else {
+  SvREFCNT_dec(oi->orig_pkg);
+  SvREFCNT_dec(oi->type_pkg);
+  SvREFCNT_dec(oi->type_meth);
+#endif /* !MULTIPLICITY */
  }
 
+#ifdef MULTIPLICITY
+ {
+  STRLEN op_len       = SvCUR(orig_pkg);
+  STRLEN tp_len       = SvCUR(type_pkg);
+  STRLEN tm_len       = SvCUR(type_meth);
+  STRLEN new_buf_size = op_len + tp_len + tm_len;
+  char *buf;
+  if (new_buf_size > oi->buf_size) {
+   PerlMemShared_free(oi->buf);
+   oi->buf      = PerlMemShared_malloc(new_buf_size);
+   oi->buf_size = new_buf_size;
+  }
+  buf  = oi->buf;
+  Copy(SvPVX(orig_pkg),  buf, op_len, char);
+  buf += op_len;
+  Copy(SvPVX(type_pkg),  buf, tp_len, char);
+  buf += tp_len;
+  Copy(SvPVX(type_meth), buf, tm_len, char);
+  oi->orig_pkg_len  = op_len;
+  oi->type_pkg_len  = tp_len;
+  oi->type_meth_len = tm_len;
+  SvREFCNT_dec(orig_pkg);
+  SvREFCNT_dec(type_pkg);
+  SvREFCNT_dec(type_meth);
+ }
+#else /* MULTIPLICITY */
  oi->orig_pkg  = orig_pkg;
  oi->type_pkg  = type_pkg;
  oi->type_meth = type_meth;
+#endif /* !MULTIPLICITY */
+
  oi->pp_padsv  = pp_padsv;
 
 #ifdef USE_ITHREADS
@@ -360,20 +436,40 @@ STATIC OP *lt_pp_padsv(pTHX) {
   SV *sv         = PAD_SVl(targ);
 
   if (sv) {
+   SV *orig_pkg, *type_pkg, *type_meth;
    int items;
    dSP;
 
    ENTER;
    SAVETMPS;
 
+#ifdef MULTIPLICITY
+   {
+    STRLEN op_len = oi.orig_pkg_len, tp_len = oi.type_pkg_len;
+    char *buf = oi.buf;
+    orig_pkg  = sv_2mortal(newSVpvn(buf, op_len));
+    SvREADONLY_on(orig_pkg);
+    buf      += op_len;
+    type_pkg  = sv_2mortal(newSVpvn(buf, tp_len));
+    SvREADONLY_on(type_pkg);
+    buf      += tp_len;
+    type_meth = sv_2mortal(newSVpvn(buf, oi.type_meth_len));
+    SvREADONLY_on(type_meth);
+   }
+#else /* MULTIPLICITY */
+   orig_pkg  = oi.orig_pkg;
+   type_pkg  = oi.type_pkg;
+   type_meth = oi.type_meth;
+#endif /* !MULTIPLICITY */
+
    PUSHMARK(SP);
    EXTEND(SP, 3);
-   PUSHs(oi.type_pkg);
+   PUSHs(type_pkg);
    PUSHs(sv);
-   PUSHs(oi.orig_pkg);
+   PUSHs(orig_pkg);
    PUTBACK;
 
-   items = call_sv(oi.type_meth, G_ARRAY | G_METHOD);
+   items = call_sv(type_meth, G_ARRAY | G_METHOD);
 
    SPAGAIN;
    switch (items) {
@@ -397,25 +493,27 @@ STATIC OP *lt_pp_padsv(pTHX) {
  return CALL_FPTR(PL_ppaddr[OP_PADSV])(aTHX);
 }
 
-STATIC OP *(*lt_pp_padsv_saved)(pTHX) = 0;
-
-STATIC void lt_pp_padsv_save(void) {
- if (lt_pp_padsv_saved)
+STATIC void lt_pp_padsv_save(pMY_CXT) {
+#define lt_pp_padsv_save() lt_pp_padsv_save(aMY_CXT)
+ if (MY_CXT.pp_padsv_saved)
   return;
 
- lt_pp_padsv_saved   = PL_ppaddr[OP_PADSV];
- PL_ppaddr[OP_PADSV] = lt_pp_padsv;
+ MY_CXT.pp_padsv_saved = PL_ppaddr[OP_PADSV];
+ PL_ppaddr[OP_PADSV]   = lt_pp_padsv;
 }
 
-STATIC void lt_pp_padsv_restore(OP *o) {
- if (!lt_pp_padsv_saved)
+STATIC void lt_pp_padsv_restore(pMY_CXT_ OP *o) {
+#define lt_pp_padsv_restore(O) lt_pp_padsv_restore(aMY_CXT_ (O))
+ OP *(*saved)(pTHX) = MY_CXT.pp_padsv_saved;
+
+ if (!saved)
   return;
 
  if (o->op_ppaddr == lt_pp_padsv)
-  o->op_ppaddr = lt_pp_padsv_saved;
+  o->op_ppaddr = saved;
 
- PL_ppaddr[OP_PADSV] = lt_pp_padsv_saved;
- lt_pp_padsv_saved   = 0;
+ PL_ppaddr[OP_PADSV]   = saved;
+ MY_CXT.pp_padsv_saved = 0;
 }
 
 /* ... Our ck_pad{any,sv} .................................................. */
@@ -428,13 +526,12 @@ STATIC void lt_pp_padsv_restore(OP *o) {
  * pp_padsv, but much less than if we would have set PL_ppaddr[OP_PADSV]
  * globally. */
 
-STATIC SV *lt_default_meth = NULL;
-
 STATIC OP *(*lt_old_ck_padany)(pTHX_ OP *) = 0;
 
 STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  HV *stash;
  SV *code;
+ dMY_CXT;
 
  lt_pp_padsv_restore(o);
 
@@ -443,7 +540,7 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  stash = PL_in_my_stash;
  if (stash && (code = lt_hint())) {
   SV *orig_pkg  = newSVpvn(HvNAME_get(stash), HvNAMELEN_get(stash));
-  SV *orig_meth = lt_default_meth;
+  SV *orig_meth = MY_CXT.default_meth;
   SV *type_pkg  = NULL;
   SV *type_meth = NULL;
   int items;
@@ -501,7 +598,7 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
 
   lt_pp_padsv_save();
 
-  lt_map_store(o, orig_pkg, type_pkg, type_meth, lt_pp_padsv_saved);
+  lt_map_store(o, orig_pkg, type_pkg, type_meth, MY_CXT.pp_padsv_saved);
  } else {
 skip:
   lt_map_delete(o);
@@ -513,6 +610,8 @@ skip:
 STATIC OP *(*lt_old_ck_padsv)(pTHX_ OP *) = 0;
 
 STATIC OP *lt_ck_padsv(pTHX_ OP *o) {
+ dMY_CXT;
+
  lt_pp_padsv_restore(o);
 
  lt_map_delete(o);
@@ -532,21 +631,22 @@ BOOT:
 {                                    
  if (!lt_initialized++) {
   HV *stash;
-#if LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION
+
   MY_CXT_INIT;
-  MY_CXT.tbl   = ptable_new();
+#if LT_THREADSAFE || LT_WORKAROUND_REQUIRE_PROPAGATION
+  MY_CXT.tbl            = ptable_new();
 #endif
 #if LT_THREADSAFE
-  MY_CXT.owner = aTHX;
+  MY_CXT.owner          = aTHX;
 #endif
+  MY_CXT.pp_padsv_saved = 0;
+  MY_CXT.default_meth   = newSVpvn("TYPEDSCALAR", 11);
+  SvREADONLY_on(MY_CXT.default_meth);
 
   lt_op_map = ptable_new();
 #ifdef USE_ITHREADS
   MUTEX_INIT(&lt_op_map_mutex);
 #endif
-
-  lt_default_meth = newSVpvn("TYPEDSCALAR", 11);
-  SvREADONLY_on(lt_default_meth);
 
   PERL_HASH(lt_hash, __PACKAGE__, __PACKAGE_LEN__);
 
@@ -568,6 +668,7 @@ PROTOTYPE: DISABLE
 PREINIT:
  ptable *t;
  int    *level;
+ SV     *cloned_default_meth;
 CODE:
  {
   my_cxt_t ud;
@@ -575,11 +676,14 @@ CODE:
   ud.tbl   = t = ptable_new();
   ud.owner = MY_CXT.owner;
   ptable_walk(MY_CXT.tbl, lt_ptable_hints_clone, &ud);
+  cloned_default_meth = lt_clone(MY_CXT.default_meth, MY_CXT.owner);
  }
  {
   MY_CXT_CLONE;
-  MY_CXT.tbl   = t;
-  MY_CXT.owner = aTHX;
+  MY_CXT.tbl            = t;
+  MY_CXT.owner          = aTHX;
+  MY_CXT.pp_padsv_saved = 0;
+  MY_CXT.default_meth   = cloned_default_meth;
  }
  {
   level = PerlMemShared_malloc(sizeof *level);

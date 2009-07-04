@@ -2,7 +2,7 @@ NAME
     Lexical::Types - Extend the semantics of typed lexicals.
 
 VERSION
-    Version 0.07
+    Version 0.08
 
 SYNOPSIS
         { package Str; }

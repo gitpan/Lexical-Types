@@ -34,6 +34,7 @@ BEGIN {
   my $tid = threads->tid();
   my ($file, $line) = (caller(0))[1, 2];
   my $where = "at $file line $line in thread $tid";
+  local $Test::Builder::Level = $Test::Builder::Level + 1;
   Test::More::is($_[0], __PACKAGE__, "base type is correct $where");
   Test::More::is($_[2], 'Tag', "original type is correct $where");
   $_[1] = $tid;

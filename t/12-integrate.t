@@ -23,12 +23,14 @@ use Test::More tests => 5 + 4;
 
  sub new_str {
   $_[1] = 'str:' . (caller(0))[2];
+  local $Test::Builder::Level = $Test::Builder::Level + 1;
   Test::More::is($_[2], 'Str', 'original type is correct');
   ();
  }
 
  sub new_int {
   $_[1] = (caller(0))[2];
+  local $Test::Builder::Level = $Test::Builder::Level + 1;
   Test::More::is($_[2], 'Int', 'original type is correct');
   ();
  }
