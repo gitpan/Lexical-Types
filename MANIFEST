@@ -20,6 +20,7 @@ t/21-tie.t
 t/22-magic.t
 t/23-magic-uvar.t
 t/30-threads.t
+t/31-threads-teardown.t
 t/40-stress.t
 t/91-pod.t
 t/92-pod-coverage.t
@@ -27,3 +28,5 @@ t/95-portability-files.t
 t/99-kwalitee.t
 t/lib/Lexical/Types/TestRequired1.pm
 t/lib/Lexical/Types/TestRequired2.pm
+t/lib/Lexical/Types/TestRequired3X.pm
+t/lib/Lexical/Types/TestRequired3Y.pm

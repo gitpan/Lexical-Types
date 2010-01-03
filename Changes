@@ -1,5 +1,15 @@
 Revision history for Lexical-Types
 
+0.09    2010-01-03 00:00 UTC
+        + Fix : Building and testing with blead.
+        + Fix : Unbalanced scopes when skipping a typed declaration.
+        + Fix : Segfaults when Lexical::Types is loaded for the first time from
+                inside a thread.
+        + Fix : Leaks of memory associated with the root interpreter.
+        + Fix : Work around Kwalitee test misfailures.
+        + Opt : Less memory will be used for non-threaded perls version 5.10.0
+                and below, and for threaded perls from version 5.10.1.
+
 0.08    2009-07-04 19:35 UTC
         + Fix : Don't leak the old op info when a pointer table entry is reused.
         + Fix : Possibly missed constructs with eval STRING called in a thread.
