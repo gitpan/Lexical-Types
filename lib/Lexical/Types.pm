@@ -1,11 +1,9 @@
 package Lexical::Types;
 
-use 5.008;
+use 5.008003;
 
 use strict;
 use warnings;
-
-use Carp qw/croak/;
 
 =head1 NAME
 
@@ -13,13 +11,13 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.09
+Version 0.10
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.09';
+ $VERSION = '0.10';
 }
 
 =head1 SYNOPSIS
@@ -152,7 +150,8 @@ sub import {
    $as .= '::' if $as !~ /::$/;
    $hint = _tag(sub { $as . $_[0] });
   } else {
-   croak "Invalid $r reference for 'as'";
+   require Carp;
+   Carp::croak("Invalid $r reference for 'as'");
   }
  } else {
   $hint = _tag(sub { @_ });
@@ -222,7 +221,7 @@ If you prefer to use constants rather than creating empty packages, you can repl
 
     sub import {
      my $pkg = caller;
-     for (qw/Str Int/) {
+     for (qw<Str Int>) {
       my $type = __PACKAGE__ . '::' . $_;
       no strict 'refs';
       no warnings 'redefine';
@@ -251,6 +250,11 @@ If you prefer to use constants rather than creating empty packages, you can repl
 
 True iff the module could have been built with thread-safety features enabled.
 
+=head2 C<LT_FORKSAFE>
+
+True iff this module could have been built with fork-safety features enabled.
+This will always be true except on Windows where it's false for perl 5.10.0 and below .
+
 =head1 CAVEATS
 
 The restrictions on the type (being either a defined package name or a constant) apply even if you use the C<'as'> option to redirect to another package, and are unlikely to find a workaround as this happens deep inside the lexer - far from the reach of an extension.
@@ -264,7 +268,12 @@ This is due to a shortcoming in the way perl handles the hints hash, which is ad
 
 =head1 DEPENDENCIES
 
-L<perl> 5.8, L<XSLoader>.
+L<perl> 5.8.3.
+
+A C compiler.
+This module may happen to build with a C++ compiler as well, but don't rely on it, as no guarantee is made in this regard.
+
+L<XSLoader> (standard since perl 5.006).
 
 =head1 SEE ALSO
 
@@ -298,7 +307,7 @@ Thanks Florian Ragwitz for suggesting the use of constants for types.
 
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2009,2010 Vincent Pit, all rights reserved.
+Copyright 2009,2010,2011 Vincent Pit, all rights reserved.
 
 This program is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
 

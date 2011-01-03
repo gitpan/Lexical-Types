@@ -27,6 +27,10 @@
 # define LT_WORKAROUND_REQUIRE_PROPAGATION !LT_HAS_PERL(5, 10, 1)
 #endif
 
+#ifndef LT_HAS_RPEEP
+# define LT_HAS_RPEEP LT_HAS_PERL(5, 13, 5)
+#endif
+
 #ifndef HvNAME_get
 # define HvNAME_get(H) HvNAME(H)
 #endif
@@ -39,15 +43,12 @@
 # define SvREFCNT_inc_simple_NN SvREFCNT_inc
 #endif
 
-#ifndef ENTER_with_name
-# define ENTER_with_name(N) ENTER
-#endif
-
-#ifndef LEAVE_with_name
-# define LEAVE_with_name(N) LEAVE
-#endif
-
 /* ... Thread safety and multiplicity ...................................... */
+
+/* Safe unless stated otherwise in Makefile.PL */
+#ifndef LT_FORKSAFE
+# define LT_FORKSAFE 1
+#endif
 
 #ifndef LT_MULTIPLICITY
 # if defined(MULTIPLICITY) || defined(PERL_IMPLICIT_CONTEXT)
@@ -56,7 +57,8 @@
 #  define LT_MULTIPLICITY 0
 # endif
 #endif
-#if LT_MULTIPLICITY && !defined(tTHX)
+
+#ifndef tTHX
 # define tTHX PerlInterpreter*
 #endif
 
@@ -99,7 +101,7 @@
 
 typedef struct {
  SV *code;
- IV  cxreq;
+ IV  require_tag;
 } lt_hint_t;
 
 #define LT_HINT_STRUCT 1
@@ -141,6 +143,22 @@ typedef SV lt_hint_t;
 
 #endif /* LT_THREADSAFE */
 
+/* ... "Seen" pointer table ................................................ */
+
+#if !LT_HAS_RPEEP
+
+#define PTABLE_NAME        ptable_seen
+#define PTABLE_VAL_FREE(V) NOOP
+
+#include "ptable.h"
+
+/* PerlMemShared_free() needs the [ap]PTBLMS_? default values */
+#define ptable_seen_store(T, K, V) ptable_seen_store(aPTBLMS_ (T), (K), (V))
+#define ptable_seen_clear(T)       ptable_seen_clear(aPTBLMS_ (T))
+#define ptable_seen_free(T)        ptable_seen_free(aPTBLMS_ (T))
+
+#endif /* !LT_HAS_RPEEP */
+
 /* ... Global data ......................................................... */
 
 #define MY_CXT_KEY __PACKAGE__ "::_guts" XS_VERSION
@@ -150,8 +168,10 @@ typedef struct {
  ptable *tbl; /* It really is a ptable_hints */
  tTHX    owner;
 #endif
+#if !LT_HAS_RPEEP
+ ptable *seen; /* It really is a ptable_seen */
+#endif
  SV     *default_meth;
- OP *  (*pp_padsv_saved)(pTHX);
 } my_cxt_t;
 
 START_MY_CXT
@@ -160,71 +180,62 @@ START_MY_CXT
 
 #if LT_THREADSAFE
 
-STATIC SV *lt_clone(pTHX_ SV *sv, tTHX owner) {
-#define lt_clone(S, O) lt_clone(aTHX_ (S), (O))
- CLONE_PARAMS  param;
- AV           *stashes = NULL;
- SV           *dupsv;
+typedef struct {
+ ptable *tbl;
+#if LT_HAS_PERL(5, 13, 2)
+ CLONE_PARAMS *params;
+#else
+ CLONE_PARAMS params;
+#endif
+} lt_ptable_clone_ud;
 
- if (SvTYPE(sv) == SVt_PVHV && HvNAME_get(sv))
-  stashes = newAV();
+#if LT_HAS_PERL(5, 13, 2)
+# define lt_ptable_clone_ud_init(U, T, O) \
+   (U).tbl    = (T); \
+   (U).params = Perl_clone_params_new((O), aTHX)
+# define lt_ptable_clone_ud_deinit(U) Perl_clone_params_del((U).params)
+# define lt_dup_inc(S, U)             SvREFCNT_inc(sv_dup((S), (U)->params))
+#else
+# define lt_ptable_clone_ud_init(U, T, O) \
+   (U).tbl               = (T);     \
+   (U).params.stashes    = newAV(); \
+   (U).params.flags      = 0;       \
+   (U).params.proto_perl = (O)
+# define lt_ptable_clone_ud_deinit(U) SvREFCNT_dec((U).params.stashes)
+# define lt_dup_inc(S, U)             SvREFCNT_inc(sv_dup((S), &((U)->params)))
+#endif
 
- param.stashes    = stashes;
- param.flags      = 0;
- param.proto_perl = owner;
-
- dupsv = sv_dup(sv, &param);
-
- if (stashes) {
-  av_undef(stashes);
-  SvREFCNT_dec(stashes);
- }
-
- return SvREFCNT_inc(dupsv);
-}
-
-STATIC void lt_ptable_hints_clone(pTHX_ ptable_ent *ent, void *ud_) {
- my_cxt_t  *ud  = ud_;
+STATIC void lt_ptable_clone(pTHX_ ptable_ent *ent, void *ud_) {
+ lt_ptable_clone_ud *ud = ud_;
  lt_hint_t *h1 = ent->val;
  lt_hint_t *h2;
 
- if (ud->owner == aTHX)
-  return;
-
 #if LT_HINT_STRUCT
 
- h2        = PerlMemShared_malloc(sizeof *h2);
- h2->code  = lt_clone(h1->code, ud->owner);
- SvREFCNT_inc(h2->code);
+ h2              = PerlMemShared_malloc(sizeof *h2);
+ h2->code        = lt_dup_inc(h1->code, ud);
 #if LT_WORKAROUND_REQUIRE_PROPAGATION
- h2->cxreq = h1->cxreq;
+ h2->require_tag = PTR2IV(lt_dup_inc(INT2PTR(SV *, h1->require_tag), ud));
 #endif
 
 #else /*   LT_HINT_STRUCT */
 
- h2 = lt_clone(h1, ud->owner);
- SvREFCNT_inc(h2);
+ h2 = lt_dup_inc(h1, ud);
 
 #endif /* !LT_HINT_STRUCT */
 
  ptable_hints_store(ud->tbl, ent->key, h2);
 }
 
-STATIC void lt_thread_cleanup(pTHX_ void *);
+#include "reap.h"
 
 STATIC void lt_thread_cleanup(pTHX_ void *ud) {
- int *level = ud;
+ dMY_CXT;
 
- if (*level) {
-  *level = 0;
-  LEAVE;
-  SAVEDESTRUCTOR_X(lt_thread_cleanup, level);
-  ENTER;
- } else {
-  dMY_CXT;
-  PerlMemShared_free(level);
-  ptable_hints_free(MY_CXT.tbl);
- }
+ ptable_hints_free(MY_CXT.tbl);
+#if !LT_HAS_RPEEP
+ ptable_seen_free(MY_CXT.seen);
+#endif /* !LT_HAS_RPEEP */
 }
 
 #endif /* LT_THREADSAFE */
@@ -232,30 +243,57 @@ STATIC void lt_thread_cleanup(pTHX_ void *ud) {
 /* ... Hint tags ........................................................... */
 
 #if LT_WORKAROUND_REQUIRE_PROPAGATION
+
 STATIC IV lt_require_tag(pTHX) {
 #define lt_require_tag() lt_require_tag(aTHX)
- const PERL_SI *si;
+ const CV *cv, *outside;
 
- for (si = PL_curstackinfo; si; si = si->si_prev) {
-  I32 cxix;
+ cv = PL_compcv;
 
-  for (cxix = si->si_cxix; cxix >= 0; --cxix) {
-   const PERL_CONTEXT *cx = si->si_cxstack + cxix;
+ if (!cv) {
+  /* If for some reason the pragma is operational at run-time, try to discover
+   * the current cv in use. */
+  const PERL_SI *si;
 
-   if (CxTYPE(cx) == CXt_EVAL && cx->blk_eval.old_op_type == OP_REQUIRE)
-    return PTR2IV(cx);
+  for (si = PL_curstackinfo; si; si = si->si_prev) {
+   I32 cxix;
+
+   for (cxix = si->si_cxix; cxix >= 0; --cxix) {
+    const PERL_CONTEXT *cx = si->si_cxstack + cxix;
+
+    switch (CxTYPE(cx)) {
+     case CXt_SUB:
+     case CXt_FORMAT:
+      /* The propagation workaround is only needed up to 5.10.0 and at that
+       * time format and sub contexts were still identical. And even later the
+       * cv members offsets should have been kept the same. */
+      cv = cx->blk_sub.cv;
+      goto get_enclosing_cv;
+     case CXt_EVAL:
+      cv = cx->blk_eval.cv;
+      goto get_enclosing_cv;
+     default:
+      break;
+    }
+   }
   }
+
+  cv = PL_main_cv;
  }
 
- return PTR2IV(NULL);
+get_enclosing_cv:
+ for (outside = CvOUTSIDE(cv); outside; outside = CvOUTSIDE(cv))
+  cv = outside;
+
+ return PTR2IV(cv);
 }
+
 #endif /* LT_WORKAROUND_REQUIRE_PROPAGATION */
 
 STATIC SV *lt_tag(pTHX_ SV *value) {
 #define lt_tag(V) lt_tag(aTHX_ (V))
  lt_hint_t *h;
  SV *code = NULL;
- dMY_CXT;
 
  if (SvROK(value)) {
   value = SvRV(value);
@@ -267,19 +305,22 @@ STATIC SV *lt_tag(pTHX_ SV *value) {
 
 #if LT_HINT_STRUCT
  h = PerlMemShared_malloc(sizeof *h);
- h->code  = code;
+ h->code        = code;
 # if LT_WORKAROUND_REQUIRE_PROPAGATION
- h->cxreq = lt_require_tag();
+ h->require_tag = lt_require_tag();
 # endif /* LT_WORKAROUND_REQUIRE_PROPAGATION */
 #else  /*  LT_HINT_STRUCT */
  h = code;
 #endif /* !LT_HINT_STRUCT */
 
 #if LT_THREADSAFE
- /* We only need for the key to be an unique tag for looking up the value later.
-  * Allocated memory provides convenient unique identifiers, so that's why we
-  * use the hint as the key itself. */
- ptable_hints_store(MY_CXT.tbl, h, h);
+ {
+  dMY_CXT;
+  /* We only need for the key to be an unique tag for looking up the value later
+   * Allocated memory provides convenient unique identifiers, so that's why we
+   * use the hint as the key itself. */
+  ptable_hints_store(MY_CXT.tbl, h, h);
+ }
 #endif /* LT_THREADSAFE */
 
  return newSViv(PTR2IV(h));
@@ -288,7 +329,9 @@ STATIC SV *lt_tag(pTHX_ SV *value) {
 STATIC SV *lt_detag(pTHX_ const SV *hint) {
 #define lt_detag(H) lt_detag(aTHX_ (H))
  lt_hint_t *h;
+#if LT_THREADSAFE
  dMY_CXT;
+#endif
 
  if (!(hint && SvIOK(hint)))
   return NULL;
@@ -298,7 +341,7 @@ STATIC SV *lt_detag(pTHX_ const SV *hint) {
  h = ptable_fetch(MY_CXT.tbl, h);
 #endif /* LT_THREADSAFE */
 #if LT_WORKAROUND_REQUIRE_PROPAGATION
- if (lt_require_tag() != h->cxreq)
+ if (lt_require_tag() != h->require_tag)
   return NULL;
 #endif /* LT_WORKAROUND_REQUIRE_PROPAGATION */
 
@@ -310,7 +353,9 @@ STATIC U32 lt_hash = 0;
 STATIC SV *lt_hint(pTHX) {
 #define lt_hint() lt_hint(aTHX)
  SV *hint;
-#if LT_HAS_PERL(5, 9, 5)
+#ifdef cop_hints_fetch_pvn
+ hint = cop_hints_fetch_pvn(PL_curcop, __PACKAGE__, __PACKAGE_LEN__, lt_hash,0);
+#elif LT_HAS_PERL(5, 9, 5)
  hint = Perl_refcounted_he_fetch(aTHX_ PL_curcop->cop_hints_hash,
                                        NULL,
                                        __PACKAGE__, __PACKAGE_LEN__,
@@ -334,12 +379,23 @@ STATIC SV *lt_hint(pTHX) {
 
 /* PerlMemShared_free() needs the [ap]PTBLMS_? default values */
 #define ptable_map_store(T, K, V) ptable_map_store(aPTBLMS_ (T), (K), (V))
+#define ptable_map_delete(T, K)   ptable_map_delete(aPTBLMS_ (T), (K))
 
 STATIC ptable *lt_op_map = NULL;
 
 #ifdef USE_ITHREADS
+
 STATIC perl_mutex lt_op_map_mutex;
-#endif
+
+#define LT_LOCK(M)   MUTEX_LOCK(M)
+#define LT_UNLOCK(M) MUTEX_UNLOCK(M)
+
+#else /* USE_ITHREADS */
+
+#define LT_LOCK(M)
+#define LT_UNLOCK(M)
+
+#endif /* !USE_ITHREADS */
 
 typedef struct {
 #ifdef MULTIPLICITY
@@ -357,9 +413,7 @@ STATIC void lt_map_store(pTHX_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type
 #define lt_map_store(O, OP, TP, TM, PP) lt_map_store(aTHX_ (O), (OP), (TP), (TM), (PP))
  lt_op_info *oi;
 
-#ifdef USE_ITHREADS
- MUTEX_LOCK(&lt_op_map_mutex);
-#endif
+ LT_LOCK(&lt_op_map_mutex);
 
  if (!(oi = ptable_fetch(lt_op_map, o))) {
   oi = PerlMemShared_malloc(sizeof *oi);
@@ -408,17 +462,13 @@ STATIC void lt_map_store(pTHX_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type
 
  oi->old_pp_padsv = old_pp_padsv;
 
-#ifdef USE_ITHREADS
- MUTEX_UNLOCK(&lt_op_map_mutex);
-#endif
+ LT_UNLOCK(&lt_op_map_mutex);
 }
 
 STATIC const lt_op_info *lt_map_fetch(const OP *o, lt_op_info *oi) {
  const lt_op_info *val;
 
-#ifdef USE_ITHREADS
- MUTEX_LOCK(&lt_op_map_mutex);
-#endif
+ LT_LOCK(&lt_op_map_mutex);
 
  val = ptable_fetch(lt_op_map, o);
  if (val) {
@@ -426,24 +476,18 @@ STATIC const lt_op_info *lt_map_fetch(const OP *o, lt_op_info *oi) {
   val = oi;
  }
 
-#ifdef USE_ITHREADS
- MUTEX_UNLOCK(&lt_op_map_mutex);
-#endif
+ LT_UNLOCK(&lt_op_map_mutex);
 
  return val;
 }
 
 STATIC void lt_map_delete(pTHX_ const OP *o) {
 #define lt_map_delete(O) lt_map_delete(aTHX_ (O))
-#ifdef USE_ITHREADS
- MUTEX_LOCK(&lt_op_map_mutex);
-#endif
+ LT_LOCK(&lt_op_map_mutex);
 
- ptable_map_store(lt_op_map, o, NULL);
+ ptable_map_delete(lt_op_map, o);
 
-#ifdef USE_ITHREADS
- MUTEX_UNLOCK(&lt_op_map_mutex);
-#endif
+ LT_UNLOCK(&lt_op_map_mutex);
 }
 
 /* --- Hooks --------------------------------------------------------------- */
@@ -453,114 +497,82 @@ STATIC void lt_map_delete(pTHX_ const OP *o) {
 STATIC OP *lt_pp_padsv(pTHX) {
  lt_op_info oi;
 
- if ((PL_op->op_private & OPpLVAL_INTRO) && lt_map_fetch(PL_op, &oi)) {
-  PADOFFSET targ = PL_op->op_targ;
-  SV *sv         = PAD_SVl(targ);
+ if (lt_map_fetch(PL_op, &oi)) {
+  SV *orig_pkg, *type_pkg, *type_meth;
+  int items;
+  dSP;
+  dTARGET;
 
-  if (sv) {
-   SV *orig_pkg, *type_pkg, *type_meth;
-   int items;
-   dSP;
-
-   ENTER;
-   SAVETMPS;
+  ENTER;
+  SAVETMPS;
 
 #ifdef MULTIPLICITY
-   {
-    STRLEN op_len = oi.orig_pkg_len, tp_len = oi.type_pkg_len;
-    char *buf = oi.buf;
-    orig_pkg  = sv_2mortal(newSVpvn(buf, op_len));
-    SvREADONLY_on(orig_pkg);
-    buf      += op_len;
-    type_pkg  = sv_2mortal(newSVpvn(buf, tp_len));
-    SvREADONLY_on(type_pkg);
-    buf      += tp_len;
-    type_meth = sv_2mortal(newSVpvn(buf, oi.type_meth_len));
-    SvREADONLY_on(type_meth);
-   }
+  {
+   STRLEN op_len = oi.orig_pkg_len, tp_len = oi.type_pkg_len;
+   char *buf = oi.buf;
+   orig_pkg  = sv_2mortal(newSVpvn(buf, op_len));
+   SvREADONLY_on(orig_pkg);
+   buf      += op_len;
+   type_pkg  = sv_2mortal(newSVpvn(buf, tp_len));
+   SvREADONLY_on(type_pkg);
+   buf      += tp_len;
+   type_meth = sv_2mortal(newSVpvn(buf, oi.type_meth_len));
+   SvREADONLY_on(type_meth);
+  }
 #else /* MULTIPLICITY */
-   orig_pkg  = oi.orig_pkg;
-   type_pkg  = oi.type_pkg;
-   type_meth = oi.type_meth;
+  orig_pkg  = oi.orig_pkg;
+  type_pkg  = oi.type_pkg;
+  type_meth = oi.type_meth;
 #endif /* !MULTIPLICITY */
 
-   PUSHMARK(SP);
-   EXTEND(SP, 3);
-   PUSHs(type_pkg);
-   PUSHs(sv);
-   PUSHs(orig_pkg);
-   PUTBACK;
+  PUSHMARK(SP);
+  EXTEND(SP, 3);
+  PUSHs(type_pkg);
+  PUSHTARG;
+  PUSHs(orig_pkg);
+  PUTBACK;
 
-   items = call_sv(type_meth, G_ARRAY | G_METHOD);
+  items = call_sv(type_meth, G_ARRAY | G_METHOD);
 
-   SPAGAIN;
-   switch (items) {
-    case 0:
-     break;
-    case 1:
-     sv_setsv(sv, POPs);
-     break;
-    default:
-     croak("Typed scalar initializer method should return zero or one scalar, but got %d", items);
-   }
-   PUTBACK;
-
-   FREETMPS;
-   LEAVE;
+  SPAGAIN;
+  switch (items) {
+   case 0:
+    break;
+   case 1:
+    sv_setsv(TARG, POPs);
+    break;
+   default:
+    croak("Typed scalar initializer method should return zero or one scalar, but got %d", items);
   }
+  PUTBACK;
 
-  return CALL_FPTR(oi.old_pp_padsv)(aTHX);
+  FREETMPS;
+  LEAVE;
+
+  return oi.old_pp_padsv(aTHX);
  }
 
- return CALL_FPTR(PL_ppaddr[OP_PADSV])(aTHX);
-}
-
-STATIC void lt_pp_padsv_save(pMY_CXT) {
-#define lt_pp_padsv_save() lt_pp_padsv_save(aMY_CXT)
- if (MY_CXT.pp_padsv_saved)
-  return;
-
- MY_CXT.pp_padsv_saved = PL_ppaddr[OP_PADSV];
- PL_ppaddr[OP_PADSV]   = lt_pp_padsv;
-}
-
-STATIC void lt_pp_padsv_restore(pMY_CXT_ OP *o) {
-#define lt_pp_padsv_restore(O) lt_pp_padsv_restore(aMY_CXT_ (O))
- OP *(*saved)(pTHX) = MY_CXT.pp_padsv_saved;
-
- if (!saved)
-  return;
-
- if (o->op_ppaddr == lt_pp_padsv)
-  o->op_ppaddr = saved;
-
- PL_ppaddr[OP_PADSV]   = saved;
- MY_CXT.pp_padsv_saved = 0;
+ return PL_op->op_ppaddr(aTHX);
 }
 
 /* ... Our ck_pad{any,sv} .................................................. */
 
-/* Sadly, the PADSV OPs we are interested in don't trigger the padsv check
- * function, but are instead manually mutated from a PADANY. This is why we set
- * PL_ppaddr[OP_PADSV] in the padany check function so that PADSV OPs will have
- * their pp_ppaddr set to our pp_padsv. PL_ppaddr[OP_PADSV] is then reset at the
- * beginning of every ck_pad{any,sv}. Some unwanted OPs can still call our
- * pp_padsv, but much less than if we would have set PL_ppaddr[OP_PADSV]
- * globally. */
+/* Sadly, the padsv OPs we are interested in don't trigger the padsv check
+ * function, but are instead manually mutated from a padany. So we store
+ * the op entry in the op map in the padany check function, and we set their
+ * op_ppaddr member in our peephole optimizer replacement below. */
 
 STATIC OP *(*lt_old_ck_padany)(pTHX_ OP *) = 0;
 
 STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  HV *stash;
  SV *code;
- dMY_CXT;
 
- lt_pp_padsv_restore(o);
-
- o = CALL_FPTR(lt_old_ck_padany)(aTHX_ o);
+ o = lt_old_ck_padany(aTHX_ o);
 
  stash = PL_in_my_stash;
  if (stash && (code = lt_hint())) {
+  dMY_CXT;
   SV *orig_pkg  = newSVpvn(HvNAME_get(stash), HvNAMELEN_get(stash));
   SV *orig_meth = MY_CXT.default_meth;
   SV *type_pkg  = NULL;
@@ -620,9 +632,7 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
    SvREFCNT_inc(orig_meth);
   }
 
-  lt_pp_padsv_save();
-
-  lt_map_store(o, orig_pkg, type_pkg, type_meth, MY_CXT.pp_padsv_saved);
+  lt_map_store(o, orig_pkg, type_pkg, type_meth, o->op_ppaddr);
  } else {
 skip:
   lt_map_delete(o);
@@ -634,20 +644,110 @@ skip:
 STATIC OP *(*lt_old_ck_padsv)(pTHX_ OP *) = 0;
 
 STATIC OP *lt_ck_padsv(pTHX_ OP *o) {
- dMY_CXT;
-
- lt_pp_padsv_restore(o);
-
  lt_map_delete(o);
 
- return CALL_FPTR(lt_old_ck_padsv)(aTHX_ o);
+ return lt_old_ck_padsv(aTHX_ o);
 }
+
+/* ... Our peephole optimizer .............................................. */
+
+STATIC peep_t lt_old_peep = 0; /* This is actually the rpeep past 5.13.5 */
+
+#if !LT_HAS_RPEEP
+# define LT_PEEP_REC_PROTO STATIC void lt_peep_rec(pTHX_ OP *o, ptable *seen)
+#else /* !LT_HAS_RPEEP */
+# define LT_PEEP_REC_PROTO STATIC void lt_peep_rec(pTHX_ OP *o)
+#endif /* LT_HAS_RPEEP */
+
+LT_PEEP_REC_PROTO;
+LT_PEEP_REC_PROTO {
+#if !LT_HAS_RPEEP
+# define lt_peep_rec(O) lt_peep_rec(aTHX_ (O), seen)
+#else /* !LT_HAS_RPEEP */
+# define lt_peep_rec(O) lt_peep_rec(aTHX_ (O))
+#endif /* LT_HAS_RPEEP */
+
+#if !LT_HAS_RPEEP
+ if (ptable_fetch(seen, o))
+  return;
+#endif
+
+ for (; o; o = o->op_next) {
+  lt_op_info *oi = NULL;
+
+#if !LT_HAS_RPEEP
+  ptable_seen_store(seen, o, o);
+#endif
+  switch (o->op_type) {
+   case OP_PADSV:
+    if (o->op_ppaddr != lt_pp_padsv && o->op_private & OPpLVAL_INTRO) {
+     LT_LOCK(&lt_op_map_mutex);
+     oi = ptable_fetch(lt_op_map, o);
+     if (oi) {
+      oi->old_pp_padsv = o->op_ppaddr;
+      o->op_ppaddr     = lt_pp_padsv;
+     }
+     LT_UNLOCK(&lt_op_map_mutex);
+    }
+    break;
+#if !LT_HAS_RPEEP
+   case OP_MAPWHILE:
+   case OP_GREPWHILE:
+   case OP_AND:
+   case OP_OR:
+   case OP_ANDASSIGN:
+   case OP_ORASSIGN:
+   case OP_COND_EXPR:
+   case OP_RANGE:
+# if LT_HAS_PERL(5, 10, 0)
+   case OP_ONCE:
+   case OP_DOR:
+   case OP_DORASSIGN:
+# endif
+    lt_peep_rec(cLOGOPo->op_other);
+    break;
+   case OP_ENTERLOOP:
+   case OP_ENTERITER:
+    lt_peep_rec(cLOOPo->op_redoop);
+    lt_peep_rec(cLOOPo->op_nextop);
+    lt_peep_rec(cLOOPo->op_lastop);
+    break;
+# if LT_HAS_PERL(5, 9, 5)
+   case OP_SUBST:
+    lt_peep_rec(cPMOPo->op_pmstashstartu.op_pmreplstart);
+    break;
+# else
+   case OP_QR:
+   case OP_MATCH:
+   case OP_SUBST:
+    lt_peep_rec(cPMOPo->op_pmreplstart);
+    break;
+# endif
+#endif /* !LT_HAS_RPEEP */
+   default:
+    break;
+  }
+ }
+}
+
+STATIC void lt_peep(pTHX_ OP *o) {
+#if !LT_HAS_RPEEP
+ dMY_CXT;
+ ptable *seen = MY_CXT.seen;
+
+ ptable_seen_clear(seen);
+#endif /* !LT_HAS_RPEEP */
+
+ lt_old_peep(aTHX_ o);
+ lt_peep_rec(o);
+}
+
+/* --- Interpreter setup/teardown ------------------------------------------ */
+
 
 STATIC U32 lt_initialized = 0;
 
 STATIC void lt_teardown(pTHX_ void *root) {
- dMY_CXT;
-
  if (!lt_initialized)
   return;
 
@@ -656,15 +756,28 @@ STATIC void lt_teardown(pTHX_ void *root) {
   return;
 #endif
 
+ {
+  dMY_CXT;
 #if LT_THREADSAFE
- ptable_hints_free(MY_CXT.tbl);
+  ptable_hints_free(MY_CXT.tbl);
 #endif
- SvREFCNT_dec(MY_CXT.default_meth);
+#if !LT_HAS_RPEEP
+  ptable_seen_free(MY_CXT.seen);
+#endif
+  SvREFCNT_dec(MY_CXT.default_meth);
+ }
 
  PL_check[OP_PADANY] = MEMBER_TO_FPTR(lt_old_ck_padany);
  lt_old_ck_padany    = 0;
  PL_check[OP_PADSV]  = MEMBER_TO_FPTR(lt_old_ck_padsv);
  lt_old_ck_padsv     = 0;
+
+#if LT_HAS_RPEEP
+ PL_rpeepp   = lt_old_peep;
+#else
+ PL_peepp    = lt_old_peep;
+#endif
+ lt_old_peep = 0;
 
  lt_initialized = 0;
 }
@@ -677,11 +790,13 @@ STATIC void lt_setup(pTHX) {
  {
   MY_CXT_INIT;
 #if LT_THREADSAFE
-  MY_CXT.tbl            = ptable_new();
-  MY_CXT.owner          = aTHX;
+  MY_CXT.tbl          = ptable_new();
+  MY_CXT.owner        = aTHX;
 #endif
-  MY_CXT.pp_padsv_saved = 0;
-  MY_CXT.default_meth   = newSVpvn("TYPEDSCALAR", 11);
+#if !LT_HAS_RPEEP
+  MY_CXT.seen         = ptable_new();
+#endif
+  MY_CXT.default_meth = newSVpvn("TYPEDSCALAR", 11);
   SvREADONLY_on(MY_CXT.default_meth);
  }
 
@@ -689,6 +804,14 @@ STATIC void lt_setup(pTHX) {
  PL_check[OP_PADANY] = MEMBER_TO_FPTR(lt_ck_padany);
  lt_old_ck_padsv     = PL_check[OP_PADSV];
  PL_check[OP_PADSV]  = MEMBER_TO_FPTR(lt_ck_padsv);
+
+#if LT_HAS_RPEEP
+ lt_old_peep = PL_rpeepp;
+ PL_rpeepp   = lt_peep;
+#else
+ lt_old_peep = PL_peepp;
+ PL_peepp    = lt_peep;
+#endif
 
 #if LT_MULTIPLICITY
  call_atexit(lt_teardown, aTHX);
@@ -721,6 +844,7 @@ BOOT:
 
   stash = gv_stashpvn(__PACKAGE__, __PACKAGE_LEN__, 1);
   newCONSTSUB(stash, "LT_THREADSAFE", newSVuv(LT_THREADSAFE));
+  newCONSTSUB(stash, "LT_FORKSAFE",   newSVuv(LT_FORKSAFE));
  }
 
  lt_setup();
@@ -733,31 +857,36 @@ CLONE(...)
 PROTOTYPE: DISABLE
 PREINIT:
  ptable *t;
- int    *level;
+#if !LT_HAS_RPEEP
+ ptable *s;
+#endif
  SV     *cloned_default_meth;
 PPCODE:
  {
-  my_cxt_t ud;
-  dMY_CXT;
-  ud.tbl   = t = ptable_new();
-  ud.owner = MY_CXT.owner;
-  ptable_walk(MY_CXT.tbl, lt_ptable_hints_clone, &ud);
-  cloned_default_meth = lt_clone(MY_CXT.default_meth, MY_CXT.owner);
+  {
+   lt_ptable_clone_ud ud;
+   dMY_CXT;
+
+   t = ptable_new();
+   lt_ptable_clone_ud_init(ud, t, MY_CXT.owner);
+   ptable_walk(MY_CXT.tbl, lt_ptable_clone, &ud);
+   cloned_default_meth = lt_dup_inc(MY_CXT.default_meth, &ud);
+   lt_ptable_clone_ud_deinit(ud);
+  }
+#if !LT_HAS_RPEEP
+  s = ptable_new();
+#endif
  }
  {
   MY_CXT_CLONE;
-  MY_CXT.tbl            = t;
-  MY_CXT.owner          = aTHX;
-  MY_CXT.pp_padsv_saved = 0;
-  MY_CXT.default_meth   = cloned_default_meth;
+  MY_CXT.tbl          = t;
+  MY_CXT.owner        = aTHX;
+#if !LT_HAS_RPEEP
+  MY_CXT.seen         = s;
+#endif
+  MY_CXT.default_meth = cloned_default_meth;
  }
- {
-  level = PerlMemShared_malloc(sizeof *level);
-  *level = 1;
-  LEAVE_with_name("sub");
-  SAVEDESTRUCTOR_X(lt_thread_cleanup, level);
-  ENTER_with_name("sub");
- }
+ reap(3, lt_thread_cleanup, NULL);
  XSRETURN(0);
 
 #endif

@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Lexical-Types
-version:            0.09
+version:            0.10
 abstract:           Extend the semantics of typed lexicals.
 author:
     - Vincent Pit <perl@profvince.com>
@@ -16,7 +16,7 @@ build_requires:
     XSLoader:             0
 requires:
     Carp:      0
-    perl:      5.008
+    perl:      5.008003
     XSLoader:  0
 resources:
     bugtracker:  http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Lexical-Types

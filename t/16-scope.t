@@ -26,7 +26,7 @@ use lib 't/lib';
  sub cb3 { push @decls, $_[0]; @_ }
  {
   no strict 'refs';
-  *{"Int3$_\::TYPEDSCALAR"} = \&Int::TYPEDSCALAR for qw/X Y Z/;
+  *{"Int3$_\::TYPEDSCALAR"} = \&Int::TYPEDSCALAR for qw<X Y Z>;
  }
  local $SIG{__WARN__} = sub { push @w, join '', 'warn:', @_ };
  eval <<' TESTREQUIRED3';
@@ -42,6 +42,6 @@ use lib 't/lib';
  @w = grep !/^warn:Attempt\s+to\s+free\s+unreferenced/, @w if $] <= 5.008003;
  is         $@,     '',  'third require test didn\'t croak prematurely';
  is_deeply \@w,     [ ], 'third require test didn\'t warn';
- is_deeply \@decls, [ map "Int3$_", qw/X Z/ ],
+ is_deeply \@decls, [ map "Int3$_", qw<X Z> ],
                          'third require test propagated in the right scopes';
 }

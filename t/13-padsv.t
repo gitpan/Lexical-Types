@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Config qw/%Config/;
+use Config qw<%Config>;
 
 use Test::More tests => 4;
 

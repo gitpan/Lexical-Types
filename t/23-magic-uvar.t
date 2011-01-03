@@ -13,7 +13,7 @@ BEGIN {
 {
  package Lexical::Types::Test::Ref;
 
- use Variable::Magic qw/wizard cast/;
+ use Variable::Magic qw<wizard cast>;
 
  our $wiz;
  BEGIN {
@@ -45,7 +45,8 @@ sub check (&$$;$) {
  my $want = wantarray;
  my @ret;
  {
-  local @{$got}{qw/fetch store/}; delete @{$got}{qw/fetch store/};
+  local @{$got}{qw<fetch store>};
+  delete @{$got}{qw<fetch store>};
   if ($want) {
    @ret = eval { $test->() };
   } elsif (defined $want) {

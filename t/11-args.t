@@ -88,7 +88,7 @@ use Test::More tests => 14 + 6;
  my $expect = qr/^Invalid ARRAY reference/;
  local $@;
  eval q[
-  use Lexical::Types as => [ qw/a b c/ ];
+  use Lexical::Types as => [ qw<a b c> ];
   my LTT $x;
  ];
  like $@, $expect, 'as => array';
@@ -99,7 +99,7 @@ use Test::More tests => 14 + 6;
  diag 'This will throw two warnings' if $] >= 5.008008 and $] < 5.009;
  local $@;
  eval q[
-  use Lexical::Types as => sub { qw/a b c/ };
+  use Lexical::Types as => sub { qw<a b c> };
   my LTT $x;
  ];
  like $@, $expect, 'as => code, returning three scalars';

@@ -1,5 +1,26 @@
 Revision history for Lexical-Types
 
+0.10    2011-01-03 20:35 UTC
+        + Add : The new constant LT_FORKSAFE can be tested to know whether the
+                module will behave nicely when fork()ing. It's currently always
+                true except on Windows where you need perl 5.10.1 for it to be
+                true.
+        + Chg : perl 5.8.3 is now required (instead of 5.8.0).
+        + Fix : Scope leaks under perl 5.8-5.10.0.
+        + Fix : Segmentation faults and misbehaviours in threaded applications.
+        + Fix : Compatibility with perl 5.13.1 and higher.
+        + Fix : Broken linkage on Windows with gcc 3.4, which appears in
+                particular when using ActivePerl's default compiler suite.
+                For those setups, the autovivification shared library will now
+                be linked against the perl dll directly (instead of the import
+                library).
+        + Tst : Threads tests are now only run on perl 5.13.4 and higher.
+                They could segfault randomly because of what seems to be an
+                internal bug of Perl, which has been addressed in 5.13.4.
+                There is also an environment variable that allows you to
+                forcefully run those tests, but it should be set only for
+                author testing and not for end users.
+
 0.09    2010-01-03 00:00 UTC
         + Fix : Building and testing with blead.
         + Fix : Unbalanced scopes when skipping a typed declaration.

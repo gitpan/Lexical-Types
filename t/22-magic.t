@@ -13,7 +13,7 @@ BEGIN {
 {
  package Lexical::Types::Test::Str;
 
- use Variable::Magic qw/wizard cast/;
+ use Variable::Magic qw<wizard cast>;
 
  our $wiz;
  BEGIN {
@@ -40,7 +40,8 @@ sub check (&$$;$) {
  my $want = wantarray;
  my @ret;
  {
-  local @{$got}{qw/get set/}; delete @{$got}{qw/get set/};
+  local @{$got}{qw<get set>};
+  delete @{$got}{qw<get set>};
   if ($want) {
    @ret = eval { $test->() };
   } elsif (defined $want) {
