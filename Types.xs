@@ -145,8 +145,6 @@ typedef SV lt_hint_t;
 
 /* ... "Seen" pointer table ................................................ */
 
-#if !LT_HAS_RPEEP
-
 #define PTABLE_NAME        ptable_seen
 #define PTABLE_VAL_FREE(V) NOOP
 
@@ -157,8 +155,6 @@ typedef SV lt_hint_t;
 #define ptable_seen_clear(T)       ptable_seen_clear(aPTBLMS_ (T))
 #define ptable_seen_free(T)        ptable_seen_free(aPTBLMS_ (T))
 
-#endif /* !LT_HAS_RPEEP */
-
 /* ... Global data ......................................................... */
 
 #define MY_CXT_KEY __PACKAGE__ "::_guts" XS_VERSION
@@ -168,9 +164,7 @@ typedef struct {
  ptable *tbl; /* It really is a ptable_hints */
  tTHX    owner;
 #endif
-#if !LT_HAS_RPEEP
  ptable *seen; /* It really is a ptable_seen */
-#endif
  SV     *default_meth;
 } my_cxt_t;
 
@@ -233,9 +227,7 @@ STATIC void lt_thread_cleanup(pTHX_ void *ud) {
  dMY_CXT;
 
  ptable_hints_free(MY_CXT.tbl);
-#if !LT_HAS_RPEEP
  ptable_seen_free(MY_CXT.seen);
-#endif /* !LT_HAS_RPEEP */
 }
 
 #endif /* LT_THREADSAFE */
@@ -653,31 +645,15 @@ STATIC OP *lt_ck_padsv(pTHX_ OP *o) {
 
 STATIC peep_t lt_old_peep = 0; /* This is actually the rpeep past 5.13.5 */
 
-#if !LT_HAS_RPEEP
-# define LT_PEEP_REC_PROTO STATIC void lt_peep_rec(pTHX_ OP *o, ptable *seen)
-#else /* !LT_HAS_RPEEP */
-# define LT_PEEP_REC_PROTO STATIC void lt_peep_rec(pTHX_ OP *o)
-#endif /* LT_HAS_RPEEP */
-
-LT_PEEP_REC_PROTO;
-LT_PEEP_REC_PROTO {
-#if !LT_HAS_RPEEP
-# define lt_peep_rec(O) lt_peep_rec(aTHX_ (O), seen)
-#else /* !LT_HAS_RPEEP */
-# define lt_peep_rec(O) lt_peep_rec(aTHX_ (O))
-#endif /* LT_HAS_RPEEP */
-
-#if !LT_HAS_RPEEP
- if (ptable_fetch(seen, o))
-  return;
-#endif
-
+STATIC void lt_peep_rec(pTHX_ OP *o, ptable *seen) {
+#define lt_peep_rec(O) lt_peep_rec(aTHX_ (O), seen)
  for (; o; o = o->op_next) {
   lt_op_info *oi = NULL;
 
-#if !LT_HAS_RPEEP
+  if (ptable_fetch(seen, o))
+   break;
   ptable_seen_store(seen, o, o);
-#endif
+
   switch (o->op_type) {
    case OP_PADSV:
     if (o->op_ppaddr != lt_pp_padsv && o->op_private & OPpLVAL_INTRO) {
@@ -731,15 +707,14 @@ LT_PEEP_REC_PROTO {
 }
 
 STATIC void lt_peep(pTHX_ OP *o) {
-#if !LT_HAS_RPEEP
  dMY_CXT;
  ptable *seen = MY_CXT.seen;
 
- ptable_seen_clear(seen);
-#endif /* !LT_HAS_RPEEP */
-
  lt_old_peep(aTHX_ o);
+
+ ptable_seen_clear(seen);
  lt_peep_rec(o);
+ ptable_seen_clear(seen);
 }
 
 /* --- Interpreter setup/teardown ------------------------------------------ */
@@ -761,9 +736,7 @@ STATIC void lt_teardown(pTHX_ void *root) {
 #if LT_THREADSAFE
   ptable_hints_free(MY_CXT.tbl);
 #endif
-#if !LT_HAS_RPEEP
   ptable_seen_free(MY_CXT.seen);
-#endif
   SvREFCNT_dec(MY_CXT.default_meth);
  }
 
@@ -793,9 +766,7 @@ STATIC void lt_setup(pTHX) {
   MY_CXT.tbl          = ptable_new();
   MY_CXT.owner        = aTHX;
 #endif
-#if !LT_HAS_RPEEP
   MY_CXT.seen         = ptable_new();
-#endif
   MY_CXT.default_meth = newSVpvn("TYPEDSCALAR", 11);
   SvREADONLY_on(MY_CXT.default_meth);
  }
@@ -857,9 +828,7 @@ CLONE(...)
 PROTOTYPE: DISABLE
 PREINIT:
  ptable *t;
-#if !LT_HAS_RPEEP
  ptable *s;
-#endif
  SV     *cloned_default_meth;
 PPCODE:
  {
@@ -873,17 +842,13 @@ PPCODE:
    cloned_default_meth = lt_dup_inc(MY_CXT.default_meth, &ud);
    lt_ptable_clone_ud_deinit(ud);
   }
-#if !LT_HAS_RPEEP
   s = ptable_new();
-#endif
  }
  {
   MY_CXT_CLONE;
   MY_CXT.tbl          = t;
   MY_CXT.owner        = aTHX;
-#if !LT_HAS_RPEEP
   MY_CXT.seen         = s;
-#endif
   MY_CXT.default_meth = cloned_default_meth;
  }
  reap(3, lt_thread_cleanup, NULL);

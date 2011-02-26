@@ -11,13 +11,13 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.10
+Version 0.11
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.10';
+ $VERSION = '0.11';
 }
 
 =head1 SYNOPSIS
@@ -289,7 +289,8 @@ You can contact me by mail or on C<irc.perl.org> (vincent).
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-lexical-types at rt.cpan.org>, or through the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Lexical-Types>.  I will be notified, and then you'll automatically be notified of progress on your bug as I make changes.
+Please report any bugs or feature requests to C<bug-lexical-types at rt.cpan.org>, or through the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Lexical-Types>.
+I will be notified, and then you'll automatically be notified of progress on your bug as I make changes.
 
 =head1 SUPPORT
 

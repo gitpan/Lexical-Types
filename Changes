@@ -1,5 +1,12 @@
 Revision history for Lexical-Types
 
+0.11    2011-02-26 22:00 UTC
+        + Fix : [RT #66164] : Lexical::Types hangs with PPI.
+                This was actually a regression introduced together with the new
+                peephole optimizer strategy, and that caused the pragma to hang
+                on constructs like "for (;;) { ... }".
+                Thanks Chisel Wright for reminding me about this issue.
+
 0.10    2011-01-03 20:35 UTC
         + Add : The new constant LT_FORKSAFE can be tested to know whether the
                 module will behave nicely when fork()ing. It's currently always
