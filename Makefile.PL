@@ -34,12 +34,12 @@ if ($^O eq 'MSWin32' and not grep /^LD[A-Z]*=/, @ARGV) {
 print $is_gcc_34 ? "yes\n" : "no\n";
 
 # Threads, Windows and 5.8.x don't seem to be best friends
-if ($^O eq 'MSWin32' && $^V lt v5.9.0) {
+if ($^O eq 'MSWin32' && "$]" < 5.009) {
  push @DEFINES, '-DLT_MULTIPLICITY=0';
 }
 
 # Fork emulation got "fixed" in 5.10.1
-if ($^O eq 'MSWin32' && $^V lt v5.10.1) {
+if ($^O eq 'MSWin32' && "$]" < 5.010001) {
  push @DEFINES, '-DLT_FORKSAFE=0';
 }
 
@@ -89,7 +89,7 @@ WriteMakefile(
  MIN_PERL_VERSION => 5.008003,
  META_MERGE       => \%META,
  dist             => {
-  PREOP    => "pod2text $file > \$(DISTVNAME)/README",
+  PREOP    => "pod2text -u $file > \$(DISTVNAME)/README",
   COMPRESS => 'gzip -9f', SUFFIX => 'gz'
  },
  clean            => {

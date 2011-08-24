@@ -24,7 +24,7 @@ sub ro_re {
 }
 
 sub maybe_warn {
- diag 'This will throw two warnings' if $] >= 5.008008 and $] < 5.009;
+ diag 'This will throw two warnings' if "$]" >= 5.008008 and "$]" < 5.009;
 }
 
 {
@@ -38,7 +38,7 @@ sub maybe_warn {
 }
 
 SKIP: {
- skip 'Kinda broken on old 5.8.x' => 1 if $] <= 5.008006;
+ skip 'Kinda broken on old 5.8.x' => 1 if "$]" <= 5.008006;
  maybe_warn();
  local $@;
  eval q!

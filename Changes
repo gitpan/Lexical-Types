@@ -1,5 +1,9 @@
 Revision history for Lexical-Types
 
+0.12    2011-08-24 16:30 UTC
+        + Fix : The pragma no longer vivifies the "Lexical::Types" entry in the
+                hints hash %^H on perl 5.8.
+
 0.11    2011-02-26 22:00 UTC
         + Fix : [RT #66164] : Lexical::Types hangs with PPI.
                 This was actually a regression introduced together with the new

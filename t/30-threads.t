@@ -16,7 +16,7 @@ BEGIN {
  skipall 'This perl wasn\'t built to support threads'
                                                     unless $Config{useithreads};
  skipall 'perl 5.13.4 required to test thread safety'
-                                                unless $force or $] >= 5.013004;
+                                              unless $force or "$]" >= 5.013004;
 }
 
 use threads;
@@ -67,7 +67,7 @@ EVALD
 SKIP:
   {
    skip 'Hints aren\'t propagated into eval STRING below perl 5.10' => 3
-                                                             unless $] >= 5.010;
+                                                           unless "$]" >= 5.010;
    eval <<'EVALD';
     my Tag $t3;
     is $t3, $tid, "typed lexical correctly initialized in eval (propagated) at run $_ in thread $tid"

@@ -16,7 +16,7 @@ BEGIN {
  skipall 'This perl wasn\'t built to support threads'
                                                     unless $Config{useithreads};
  skipall 'perl 5.13.4 required to test thread safety'
-                                                unless $force or $] >= 5.013004;
+                                              unless $force or "$]" >= 5.013004;
 }
 
 use threads;
@@ -43,7 +43,7 @@ sub run_perl {
 
 SKIP:
 {
- skip 'Fails on 5.8.2 and lower' => 1 if $] <= 5.008002;
+ skip 'Fails on 5.8.2 and lower' => 1 if "$]" <= 5.008002;
 
  my $status = run_perl <<' RUN';
   { package IntX; package IntY; package IntZ; }
