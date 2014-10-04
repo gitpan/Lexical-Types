@@ -34,7 +34,7 @@ sub Int::TYPEDSCALAR { push @lines, (caller(0))[2]; () }
 
 SKIP: {
  skip 'Broken with threaded perls before 5.8.4' => 1
-                                    if $Config{useithreads} and "$]" < 5.008004;
+                                   if $Config{useithreads} and "$]" < 5.008_004;
 
  use Lexical::Types as => sub {
   # In 5.10, this closure is compiled before hints are enabled, so no hintseval

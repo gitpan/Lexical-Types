@@ -8,12 +8,12 @@ use Test::More tests => 4;
 sub Str::TYPEDSCALAR { }
 
 sub Str1::TYPEDSCALAR {
- $_[0] = 'dongs';
+ $_[0] = 'derp';
  ();
 }
 
 sub Str2::TYPEDSCALAR {
- $_[2] = 'hlagh';
+ $_[2] = 'herp';
  ();
 }
 
@@ -24,25 +24,25 @@ sub ro_re {
 }
 
 sub maybe_warn {
- diag 'This will throw two warnings' if "$]" >= 5.008008 and "$]" < 5.009;
+ diag 'This will throw two warnings' if "$]" >= 5.008_008 and "$]" < 5.009;
 }
 
 {
  maybe_warn();
  local $@;
  eval q!
-  use Lexical::Types as => sub { $_[0] = 'dongs'; () };
+  use Lexical::Types as => sub { $_[0] = 'derp'; () };
   my Str $x;
  !;
  like $@, ro_re('', 2), '$_[0] in initializer is read only';
 }
 
 SKIP: {
- skip 'Kinda broken on old 5.8.x' => 1 if "$]" <= 5.008006;
+ skip 'Kinda broken on old 5.8.x' => 1 if "$]" <= 5.008_006;
  maybe_warn();
  local $@;
  eval q!
-  use Lexical::Types as => sub { $_[1] = 'hlagh'; () };
+  use Lexical::Types as => sub { $_[1] = 'herp'; () };
   my Str $x;
  !;
  like $@, ro_re('', 2), '$_[1] in initializer is read only';

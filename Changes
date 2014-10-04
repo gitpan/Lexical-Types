@@ -1,5 +1,28 @@
 Revision history for Lexical-Types
 
+0.13    2014-10-04 23:25 UTC
+        + Add : Support for the PERL_OP_PARENT optional feature introduced in
+                perl 5.21.2.
+        + Doc : The CAVEATS section now warns about the global slowdown during
+                compilation caused by this pragma.
+        + Fix : [RT #86112] : Doesn't hook new PADRANGE op in Perl 5.18.
+                The PADRANGE optimization is not fully supported.
+                Thanks Dagfinn Ilmari Mannsåker for reporting.
+        + Fix : Segfaults in eval in an END block of a Win32 pseudo-fork.
+        + Fix : Segfaults during global destruction of a thread or a
+                pseudo-fork.
+        + Fix : Check functions are now replaced and restored in a thread-safe
+                manner, either by using the wrap_op_checker() function from perl
+                when it is available (starting from perl 5.16) or by taking the
+                OP_REFCNT mutex on older perls.
+        + Tst : Author tests are no longer bundled with this distribution.
+                They are only made available to authors in the git repository.
+        + Tst : Test failures of t/81-threads-teardown.t on Cygwin and Android
+                should have been addressed.
+        + Tst : Threads tests will not fail anymore if resources constraints
+                prevent the system from creating all the required threads.
+        + Upd : Metadata overhaul.
+
 0.12    2011-08-24 16:30 UTC
         + Fix : The pragma no longer vivifies the "Lexical::Types" entry in the
                 hints hash %^H on perl 5.8.
@@ -22,7 +45,7 @@ Revision history for Lexical-Types
         + Fix : Compatibility with perl 5.13.1 and higher.
         + Fix : Broken linkage on Windows with gcc 3.4, which appears in
                 particular when using ActivePerl's default compiler suite.
-                For those setups, the autovivification shared library will now
+                For those setups, the Lexical::Types shared library will now
                 be linked against the perl dll directly (instead of the import
                 library).
         + Tst : Threads tests are now only run on perl 5.13.4 and higher.

@@ -4,7 +4,7 @@
       "Vincent Pit <perl@profvince.com>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.59, CPAN::Meta::Converter version 2.112150",
+   "generated_by" : "ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142690",
    "license" : [
       "perl_5"
    ],
@@ -22,22 +22,24 @@
    "prereqs" : {
       "build" : {
          "requires" : {
-            "Carp" : 0,
-            "ExtUtils::MakeMaker" : 0,
-            "Test::More" : 0,
-            "XSLoader" : 0,
-            "constant" : 0
+            "Carp" : "0",
+            "Config" : "0",
+            "ExtUtils::MakeMaker" : "0",
+            "Test::More" : "0",
+            "XSLoader" : "0",
+            "constant" : "0"
          }
       },
       "configure" : {
          "requires" : {
-            "ExtUtils::MakeMaker" : 0
+            "Config" : "0",
+            "ExtUtils::MakeMaker" : "0"
          }
       },
       "runtime" : {
          "requires" : {
-            "Carp" : 0,
-            "XSLoader" : 0,
+            "Carp" : "0",
+            "XSLoader" : "0",
             "perl" : "5.008003"
          }
       }
@@ -45,7 +47,7 @@
    "release_status" : "stable",
    "resources" : {
       "bugtracker" : {
-         "web" : "http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Lexical-Types"
+         "web" : "http://rt.cpan.org/Dist/Display.html?Name=Lexical-Types"
       },
       "homepage" : "http://search.cpan.org/dist/Lexical-Types/",
       "license" : [
@@ -55,5 +57,5 @@
          "url" : "http://git.profvince.com/?p=perl%2Fmodules%2FLexical-Types.git"
       }
    },
-   "version" : "0.12"
+   "version" : "0.13"
 }

@@ -39,8 +39,12 @@
 # define HvNAMELEN_get(H) strlen(HvNAME_get(H))
 #endif
 
-#ifndef SvREFCNT_inc_simple_NN
-# define SvREFCNT_inc_simple_NN SvREFCNT_inc
+#ifndef OP_SIBLING
+# define OP_SIBLING(O) ((O)->op_sibling)
+#endif
+
+#ifndef SvREFCNT_inc_simple_void_NN
+# define SvREFCNT_inc_simple_void_NN(S) ((void) SvREFCNT_inc(S))
 #endif
 
 /* ... Thread safety and multiplicity ...................................... */
@@ -92,6 +96,44 @@
 # undef  aMY_CXT_
 # define aMY_CXT_
 #endif
+
+#if defined(OP_CHECK_MUTEX_LOCK) && defined(OP_CHECK_MUTEX_UNLOCK)
+# define LT_CHECK_MUTEX_LOCK   OP_CHECK_MUTEX_LOCK
+# define LT_CHECK_MUTEX_UNLOCK OP_CHECK_MUTEX_UNLOCK
+#else
+# define LT_CHECK_MUTEX_LOCK   OP_REFCNT_LOCK
+# define LT_CHECK_MUTEX_UNLOCK OP_REFCNT_UNLOCK
+#endif
+
+typedef OP *(*lt_ck_t)(pTHX_ OP *);
+
+#ifdef wrap_op_checker
+
+# define lt_ck_replace(T, NC, OCP) wrap_op_checker((T), (NC), (OCP))
+
+#else
+
+STATIC void lt_ck_replace(pTHX_ OPCODE type, lt_ck_t new_ck, lt_ck_t *old_ck_p){
+#define lt_ck_replace(T, NC, OCP) lt_ck_replace(aTHX_ (T), (NC), (OCP))
+ LT_CHECK_MUTEX_LOCK;
+ if (!*old_ck_p) {
+  *old_ck_p      = PL_check[type];
+  PL_check[type] = new_ck;
+ }
+ LT_CHECK_MUTEX_UNLOCK;
+}
+
+#endif
+
+STATIC void lt_ck_restore(pTHX_ OPCODE type, lt_ck_t *old_ck_p) {
+#define lt_ck_restore(T, OCP) lt_ck_restore(aTHX_ (T), (OCP))
+ LT_CHECK_MUTEX_LOCK;
+ if (*old_ck_p) {
+  PL_check[type] = *old_ck_p;
+  *old_ck_p      = 0;
+ }
+ LT_CHECK_MUTEX_UNLOCK;
+}
 
 /* --- Helpers ------------------------------------------------------------- */
 
@@ -221,14 +263,39 @@ STATIC void lt_ptable_clone(pTHX_ ptable_ent *ent, void *ud_) {
  ptable_hints_store(ud->tbl, ent->key, h2);
 }
 
-#include "reap.h"
-
 STATIC void lt_thread_cleanup(pTHX_ void *ud) {
  dMY_CXT;
 
  ptable_hints_free(MY_CXT.tbl);
+ MY_CXT.tbl          = NULL;
  ptable_seen_free(MY_CXT.seen);
+ MY_CXT.seen         = NULL;
+ SvREFCNT_dec(MY_CXT.default_meth);
+ MY_CXT.default_meth = NULL;
 }
+
+STATIC int lt_endav_free(pTHX_ SV *sv, MAGIC *mg) {
+ SAVEDESTRUCTOR_X(lt_thread_cleanup, NULL);
+
+ return 0;
+}
+
+STATIC MGVTBL lt_endav_vtbl = {
+ 0,
+ 0,
+ 0,
+ 0,
+ lt_endav_free
+#if MGf_COPY
+ , 0
+#endif
+#if MGf_DUP
+ , 0
+#endif
+#if MGf_LOCAL
+ , 0
+#endif
+};
 
 #endif /* LT_THREADSAFE */
 
@@ -285,13 +352,19 @@ get_enclosing_cv:
 STATIC SV *lt_tag(pTHX_ SV *value) {
 #define lt_tag(V) lt_tag(aTHX_ (V))
  lt_hint_t *h;
- SV *code = NULL;
+ SV        *code = NULL;
+#if LT_THREADSAFE
+ dMY_CXT;
+
+ if (!MY_CXT.tbl)
+  return newSViv(0);
+#endif /* LT_THREADSAFE */
 
  if (SvROK(value)) {
   value = SvRV(value);
   if (SvTYPE(value) >= SVt_PVCV) {
    code = value;
-   SvREFCNT_inc_simple_NN(code);
+   SvREFCNT_inc_simple_void_NN(code);
   }
  }
 
@@ -306,13 +379,10 @@ STATIC SV *lt_tag(pTHX_ SV *value) {
 #endif /* !LT_HINT_STRUCT */
 
 #if LT_THREADSAFE
- {
-  dMY_CXT;
-  /* We only need for the key to be an unique tag for looking up the value later
-   * Allocated memory provides convenient unique identifiers, so that's why we
-   * use the hint as the key itself. */
-  ptable_hints_store(MY_CXT.tbl, h, h);
- }
+ /* We only need for the key to be an unique tag for looking up the value later
+  * Allocated memory provides convenient unique identifiers, so that's why we
+  * use the hint as the key itself. */
+ ptable_hints_store(MY_CXT.tbl, h, h);
 #endif /* LT_THREADSAFE */
 
  return newSViv(PTR2IV(h));
@@ -323,7 +393,10 @@ STATIC SV *lt_detag(pTHX_ const SV *hint) {
  lt_hint_t *h;
 #if LT_THREADSAFE
  dMY_CXT;
-#endif
+
+ if (!MY_CXT.tbl)
+  return NULL;
+#endif /* LT_THREADSAFE */
 
  if (!(hint && SvIOK(hint)))
   return NULL;
@@ -373,8 +446,6 @@ STATIC SV *lt_hint(pTHX) {
 #define ptable_map_store(T, K, V) ptable_map_store(aPTBLMS_ (T), (K), (V))
 #define ptable_map_delete(T, K)   ptable_map_delete(aPTBLMS_ (T), (K))
 
-STATIC ptable *lt_op_map = NULL;
-
 #ifdef USE_ITHREADS
 
 STATIC perl_mutex lt_op_map_mutex;
@@ -389,7 +460,10 @@ STATIC perl_mutex lt_op_map_mutex;
 
 #endif /* !USE_ITHREADS */
 
+STATIC ptable *lt_op_padxv_map = NULL;
+
 typedef struct {
+ OP *(*old_pp)(pTHX);
 #ifdef MULTIPLICITY
  STRLEN buf_size, orig_pkg_len, type_pkg_len, type_meth_len;
  char *buf;
@@ -398,18 +472,72 @@ typedef struct {
  SV *type_pkg;
  SV *type_meth;
 #endif /* !MULTIPLICITY */
- OP *(*old_pp_padsv)(pTHX);
-} lt_op_info;
+} lt_op_padxv_info;
 
-STATIC void lt_map_store(pTHX_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*old_pp_padsv)(pTHX)) {
-#define lt_map_store(O, OP, TP, TM, PP) lt_map_store(aTHX_ (O), (OP), (TP), (TM), (PP))
- lt_op_info *oi;
+STATIC void lt_op_padxv_info_call(pTHX_ const lt_op_padxv_info *oi, SV *sv) {
+#define lt_op_padxv_info_call(O, S) lt_op_padxv_info_call(aTHX_ (O), (S))
+ SV *orig_pkg, *type_pkg, *type_meth;
+ int items;
+ dSP;
+
+ ENTER;
+ SAVETMPS;
+
+#ifdef MULTIPLICITY
+ {
+  STRLEN op_len = oi->orig_pkg_len, tp_len = oi->type_pkg_len;
+  char *buf = oi->buf;
+  orig_pkg  = sv_2mortal(newSVpvn(buf, op_len));
+  SvREADONLY_on(orig_pkg);
+  buf      += op_len;
+  type_pkg  = sv_2mortal(newSVpvn(buf, tp_len));
+  SvREADONLY_on(type_pkg);
+  buf      += tp_len;
+  type_meth = sv_2mortal(newSVpvn(buf, oi->type_meth_len));
+  SvREADONLY_on(type_meth);
+ }
+#else /* MULTIPLICITY */
+ orig_pkg  = oi->orig_pkg;
+ type_pkg  = oi->type_pkg;
+ type_meth = oi->type_meth;
+#endif /* !MULTIPLICITY */
+
+ PUSHMARK(SP);
+ EXTEND(SP, 3);
+ PUSHs(type_pkg);
+ PUSHs(sv);
+ PUSHs(orig_pkg);
+ PUTBACK;
+
+ items = call_sv(type_meth, G_ARRAY | G_METHOD);
+
+ SPAGAIN;
+ switch (items) {
+  case 0:
+   break;
+  case 1:
+   sv_setsv(sv, POPs);
+   break;
+  default:
+   croak("Typed scalar initializer method should return zero or one scalar, but got %d", items);
+ }
+ PUTBACK;
+
+ FREETMPS;
+ LEAVE;
+
+ return;
+}
+
+STATIC void lt_padxv_map_store(pTHX_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type_meth, OP *(*old_pp)(pTHX)) {
+#define lt_padxv_map_store(O, OP, TP, TM, PP) lt_padxv_map_store(aTHX_ (O), (OP), (TP), (TM), (PP))
+ lt_op_padxv_info *oi;
 
  LT_LOCK(&lt_op_map_mutex);
 
- if (!(oi = ptable_fetch(lt_op_map, o))) {
+ if (!(oi = ptable_fetch(lt_op_padxv_map, o))) {
   oi = PerlMemShared_malloc(sizeof *oi);
-  ptable_map_store(lt_op_map, o, oi);
+  ptable_map_store(lt_op_padxv_map, o, oi);
 #ifdef MULTIPLICITY
   oi->buf      = NULL;
   oi->buf_size = 0;
@@ -452,17 +580,17 @@ STATIC void lt_map_store(pTHX_ const OP *o, SV *orig_pkg, SV *type_pkg, SV *type
  oi->type_meth = type_meth;
 #endif /* !MULTIPLICITY */
 
- oi->old_pp_padsv = old_pp_padsv;
+ oi->old_pp = old_pp;
 
  LT_UNLOCK(&lt_op_map_mutex);
 }
 
-STATIC const lt_op_info *lt_map_fetch(const OP *o, lt_op_info *oi) {
- const lt_op_info *val;
+STATIC const lt_op_padxv_info *lt_padxv_map_fetch(const OP *o, lt_op_padxv_info *oi) {
+ const lt_op_padxv_info *val;
 
  LT_LOCK(&lt_op_map_mutex);
 
- val = ptable_fetch(lt_op_map, o);
+ val = ptable_fetch(lt_op_padxv_map, o);
  if (val) {
   *oi = *val;
   val = oi;
@@ -473,11 +601,58 @@ STATIC const lt_op_info *lt_map_fetch(const OP *o, lt_op_info *oi) {
  return val;
 }
 
+#if LT_HAS_PERL(5, 17, 6)
+
+STATIC ptable *lt_op_padrange_map = NULL;
+
+typedef struct {
+ OP *(*old_pp)(pTHX);
+ const OP *padxv_start;
+} lt_op_padrange_info;
+
+STATIC void lt_padrange_map_store(pTHX_ const OP *o, const OP *s, OP *(*old_pp)(pTHX)) {
+#define lt_padrange_map_store(O, S, PP) lt_padrange_map_store(aTHX_ (O), (S), (PP))
+ lt_op_padrange_info *oi;
+
+ LT_LOCK(&lt_op_map_mutex);
+
+ if (!(oi = ptable_fetch(lt_op_padrange_map, o))) {
+  oi = PerlMemShared_malloc(sizeof *oi);
+  ptable_map_store(lt_op_padrange_map, o, oi);
+ }
+
+ oi->old_pp      = old_pp;
+ oi->padxv_start = s;
+
+ LT_UNLOCK(&lt_op_map_mutex);
+}
+
+STATIC const lt_op_padrange_info *lt_padrange_map_fetch(const OP *o, lt_op_padrange_info *oi) {
+ const lt_op_padrange_info *val;
+
+ LT_LOCK(&lt_op_map_mutex);
+
+ val = ptable_fetch(lt_op_padrange_map, o);
+ if (val) {
+  *oi = *val;
+  val = oi;
+ }
+
+ LT_UNLOCK(&lt_op_map_mutex);
+
+ return val;
+}
+
+#endif
+
 STATIC void lt_map_delete(pTHX_ const OP *o) {
 #define lt_map_delete(O) lt_map_delete(aTHX_ (O))
  LT_LOCK(&lt_op_map_mutex);
 
- ptable_map_delete(lt_op_map, o);
+ ptable_map_delete(lt_op_padxv_map,    o);
+#if LT_HAS_PERL(5, 17, 6)
+ ptable_map_delete(lt_op_padrange_map, o);
+#endif
 
  LT_UNLOCK(&lt_op_map_mutex);
 }
@@ -487,65 +662,44 @@ STATIC void lt_map_delete(pTHX_ const OP *o) {
 /* ... Our pp_padsv ........................................................ */
 
 STATIC OP *lt_pp_padsv(pTHX) {
- lt_op_info oi;
+ lt_op_padxv_info oi;
 
- if (lt_map_fetch(PL_op, &oi)) {
-  SV *orig_pkg, *type_pkg, *type_meth;
-  int items;
-  dSP;
+ if (lt_padxv_map_fetch(PL_op, &oi)) {
   dTARGET;
-
-  ENTER;
-  SAVETMPS;
-
-#ifdef MULTIPLICITY
-  {
-   STRLEN op_len = oi.orig_pkg_len, tp_len = oi.type_pkg_len;
-   char *buf = oi.buf;
-   orig_pkg  = sv_2mortal(newSVpvn(buf, op_len));
-   SvREADONLY_on(orig_pkg);
-   buf      += op_len;
-   type_pkg  = sv_2mortal(newSVpvn(buf, tp_len));
-   SvREADONLY_on(type_pkg);
-   buf      += tp_len;
-   type_meth = sv_2mortal(newSVpvn(buf, oi.type_meth_len));
-   SvREADONLY_on(type_meth);
-  }
-#else /* MULTIPLICITY */
-  orig_pkg  = oi.orig_pkg;
-  type_pkg  = oi.type_pkg;
-  type_meth = oi.type_meth;
-#endif /* !MULTIPLICITY */
-
-  PUSHMARK(SP);
-  EXTEND(SP, 3);
-  PUSHs(type_pkg);
-  PUSHTARG;
-  PUSHs(orig_pkg);
-  PUTBACK;
-
-  items = call_sv(type_meth, G_ARRAY | G_METHOD);
-
-  SPAGAIN;
-  switch (items) {
-   case 0:
-    break;
-   case 1:
-    sv_setsv(TARG, POPs);
-    break;
-   default:
-    croak("Typed scalar initializer method should return zero or one scalar, but got %d", items);
-  }
-  PUTBACK;
-
-  FREETMPS;
-  LEAVE;
-
-  return oi.old_pp_padsv(aTHX);
+  lt_op_padxv_info_call(&oi, TARG);
+  return oi.old_pp(aTHX);
  }
 
  return PL_op->op_ppaddr(aTHX);
 }
+
+/* ... Our pp_padrange (on perl 5.17.6 and above) .......................... */
+
+#if LT_HAS_PERL(5, 17, 6)
+
+STATIC OP *lt_pp_padrange(pTHX) {
+ lt_op_padrange_info roi;
+
+ if (lt_padrange_map_fetch(PL_op, &roi)) {
+  PADOFFSET i, base, count;
+  const OP *p;
+
+  base  = PL_op->op_targ;
+  count = PL_op->op_private & OPpPADRANGE_COUNTMASK;
+
+  for (i = 0, p = roi.padxv_start; i < count && p; ++i, p = OP_SIBLING(p)) {
+   lt_op_padxv_info oi;
+   if (p->op_type == OP_PADSV && lt_padxv_map_fetch(p, &oi))
+    lt_op_padxv_info_call(&oi, PAD_SV(base + i));
+  }
+
+  return roi.old_pp(aTHX);
+ }
+
+ return PL_op->op_ppaddr(aTHX);
+}
+
+#endif
 
 /* ... Our ck_pad{any,sv} .................................................. */
 
@@ -566,7 +720,7 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
  if (stash && (code = lt_hint())) {
   dMY_CXT;
   SV *orig_pkg  = newSVpvn(HvNAME_get(stash), HvNAMELEN_get(stash));
-  SV *orig_meth = MY_CXT.default_meth;
+  SV *orig_meth = MY_CXT.default_meth; /* Guarded by lt_hint() */
   SV *type_pkg  = NULL;
   SV *type_meth = NULL;
   int items;
@@ -616,15 +770,15 @@ STATIC OP *lt_ck_padany(pTHX_ OP *o) {
 
   if (!type_pkg) {
    type_pkg = orig_pkg;
-   SvREFCNT_inc(orig_pkg);
+   SvREFCNT_inc_simple_void_NN(orig_pkg);
   }
 
   if (!type_meth) {
    type_meth = orig_meth;
-   SvREFCNT_inc(orig_meth);
+   SvREFCNT_inc_simple_void_NN(orig_meth);
   }
 
-  lt_map_store(o, orig_pkg, type_pkg, type_meth, o->op_ppaddr);
+  lt_padxv_map_store(o, orig_pkg, type_pkg, type_meth, o->op_ppaddr);
  } else {
 skip:
   lt_map_delete(o);
@@ -643,13 +797,42 @@ STATIC OP *lt_ck_padsv(pTHX_ OP *o) {
 
 /* ... Our peephole optimizer .............................................. */
 
+#if LT_HAS_PERL(5, 17, 6)
+
+STATIC int lt_maybe_padrange_setup(pTHX_ OP *o, const OP *start) {
+#define lt_maybe_padrange_setup(O, S) lt_maybe_padrange_setup(aTHX_ (O), (S))
+ PADOFFSET i, count;
+ const OP *p;
+
+ count = o->op_private & OPpPADRANGE_COUNTMASK;
+
+ for (i = 0, p = start; i < count && p; ++i, p = OP_SIBLING(p)) {
+  if (p->op_type == OP_PADSV) {
+   /* In a padrange sequence, either all lexicals are typed, or none are.
+    * Thus we can stop at the first padsv op. However, note that these
+    * lexicals can need to call different methods in different packages. */
+   LT_LOCK(&lt_op_map_mutex);
+   if (ptable_fetch(lt_op_padxv_map, p)) {
+    LT_UNLOCK(&lt_op_map_mutex);
+    lt_padrange_map_store(o, start, o->op_ppaddr);
+    o->op_ppaddr = lt_pp_padrange;
+   } else {
+    LT_UNLOCK(&lt_op_map_mutex);
+   }
+   return 1;
+  }
+ }
+
+ return 0;
+}
+
+#endif
+
 STATIC peep_t lt_old_peep = 0; /* This is actually the rpeep past 5.13.5 */
 
 STATIC void lt_peep_rec(pTHX_ OP *o, ptable *seen) {
 #define lt_peep_rec(O) lt_peep_rec(aTHX_ (O), seen)
  for (; o; o = o->op_next) {
-  lt_op_info *oi = NULL;
-
   if (ptable_fetch(seen, o))
    break;
   ptable_seen_store(seen, o, o);
@@ -657,15 +840,44 @@ STATIC void lt_peep_rec(pTHX_ OP *o, ptable *seen) {
   switch (o->op_type) {
    case OP_PADSV:
     if (o->op_ppaddr != lt_pp_padsv && o->op_private & OPpLVAL_INTRO) {
+     lt_op_padxv_info *oi;
      LT_LOCK(&lt_op_map_mutex);
-     oi = ptable_fetch(lt_op_map, o);
+     oi = ptable_fetch(lt_op_padxv_map, o);
      if (oi) {
-      oi->old_pp_padsv = o->op_ppaddr;
-      o->op_ppaddr     = lt_pp_padsv;
+      oi->old_pp   = o->op_ppaddr;
+      o->op_ppaddr = lt_pp_padsv;
      }
      LT_UNLOCK(&lt_op_map_mutex);
     }
     break;
+#if LT_HAS_PERL(5, 17, 6)
+   case OP_PADRANGE:
+    /* We deal with special padrange ops later, in the aassign op they belong
+     * to. */
+    if (o->op_ppaddr != lt_pp_padrange && o->op_private & OPpLVAL_INTRO
+                                       && !(o->op_flags & OPf_SPECIAL)) {
+     /* A padrange op is guaranteed to have previously been a pushmark.
+      * Moreover, for non-special padrange ops (i.e. that aren't for
+      * my (...) = @_), the original padxv ops are its siblings. */
+     lt_maybe_padrange_setup(o, OP_SIBLING(o));
+    }
+    break;
+   case OP_AASSIGN: {
+    OP *op;
+    if (cBINOPo->op_first && cBINOPo->op_first->op_flags & OPf_KIDS
+                          && (op = cUNOPx(cBINOPo->op_first)->op_first)
+                          && op->op_type == OP_PADRANGE
+                          && op->op_ppaddr != lt_pp_padrange
+                          && op->op_private & OPpLVAL_INTRO
+                          && op->op_flags & OPf_SPECIAL) {
+     const OP *start = cUNOPx(cBINOPo->op_last)->op_first;
+     if (start->op_type == OP_PUSHMARK)
+      start = OP_SIBLING(start);
+     lt_maybe_padrange_setup(op, start);
+    }
+    break;
+   }
+#endif
 #if !LT_HAS_RPEEP
    case OP_MAPWHILE:
    case OP_GREPWHILE:
@@ -712,9 +924,11 @@ STATIC void lt_peep(pTHX_ OP *o) {
 
  lt_old_peep(aTHX_ o);
 
- ptable_seen_clear(seen);
- lt_peep_rec(o);
- ptable_seen_clear(seen);
+ if (seen) {
+  ptable_seen_clear(seen);
+  lt_peep_rec(o);
+  ptable_seen_clear(seen);
+ }
 }
 
 /* --- Interpreter setup/teardown ------------------------------------------ */
@@ -735,15 +949,16 @@ STATIC void lt_teardown(pTHX_ void *root) {
   dMY_CXT;
 #if LT_THREADSAFE
   ptable_hints_free(MY_CXT.tbl);
+  MY_CXT.tbl          = NULL;
 #endif
   ptable_seen_free(MY_CXT.seen);
+  MY_CXT.seen         = NULL;
   SvREFCNT_dec(MY_CXT.default_meth);
+  MY_CXT.default_meth = NULL;
  }
 
- PL_check[OP_PADANY] = MEMBER_TO_FPTR(lt_old_ck_padany);
- lt_old_ck_padany    = 0;
- PL_check[OP_PADSV]  = MEMBER_TO_FPTR(lt_old_ck_padsv);
- lt_old_ck_padsv     = 0;
+ lt_ck_restore(OP_PADANY, &lt_old_ck_padany);
+ lt_ck_restore(OP_PADSV,  &lt_old_ck_padsv);
 
 #if LT_HAS_RPEEP
  PL_rpeepp   = lt_old_peep;
@@ -771,10 +986,8 @@ STATIC void lt_setup(pTHX) {
   SvREADONLY_on(MY_CXT.default_meth);
  }
 
- lt_old_ck_padany    = PL_check[OP_PADANY];
- PL_check[OP_PADANY] = MEMBER_TO_FPTR(lt_ck_padany);
- lt_old_ck_padsv     = PL_check[OP_PADSV];
- PL_check[OP_PADSV]  = MEMBER_TO_FPTR(lt_ck_padsv);
+ lt_ck_replace(OP_PADANY, lt_ck_padany, &lt_old_ck_padany);
+ lt_ck_replace(OP_PADSV,  lt_ck_padsv,  &lt_old_ck_padsv);
 
 #if LT_HAS_RPEEP
  lt_old_peep = PL_rpeepp;
@@ -806,7 +1019,10 @@ BOOT:
  if (!lt_booted++) {
   HV *stash;
 
-  lt_op_map = ptable_new();
+  lt_op_padxv_map    = ptable_new();
+#if LT_HAS_PERL(5, 17, 6)
+  lt_op_padrange_map = ptable_new();
+#endif
 #ifdef USE_ITHREADS
   MUTEX_INIT(&lt_op_map_mutex);
 #endif
@@ -830,6 +1046,7 @@ PREINIT:
  ptable *t;
  ptable *s;
  SV     *cloned_default_meth;
+ GV     *gv;
 PPCODE:
  {
   {
@@ -851,7 +1068,23 @@ PPCODE:
   MY_CXT.seen         = s;
   MY_CXT.default_meth = cloned_default_meth;
  }
- reap(3, lt_thread_cleanup, NULL);
+ gv = gv_fetchpv(__PACKAGE__ "::_THREAD_CLEANUP", 0, SVt_PVCV);
+ if (gv) {
+  CV *cv = GvCV(gv);
+  if (!PL_endav)
+   PL_endav = newAV();
+  SvREFCNT_inc(cv);
+  if (!av_store(PL_endav, av_len(PL_endav) + 1, (SV *) cv))
+   SvREFCNT_dec(cv);
+  sv_magicext((SV *) PL_endav, NULL, PERL_MAGIC_ext, &lt_endav_vtbl, NULL, 0);
+ }
+ XSRETURN(0);
+
+void
+_THREAD_CLEANUP(...)
+PROTOTYPE: DISABLE
+PPCODE:
+ lt_thread_cleanup(aTHX_ NULL);
  XSRETURN(0);
 
 #endif

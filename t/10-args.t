@@ -96,7 +96,7 @@ use Test::More tests => 14 + 6;
 
 {
  my $expect = qr/^Lexical::Types mangler should return zero, one or two scalars, but got 3/;
- diag 'This will throw two warnings' if "$]" >= 5.008008 and "$]" < 5.009;
+ diag 'This will throw two warnings' if "$]" >= 5.008_008 and "$]" < 5.009;
  local $@;
  eval q[
   use Lexical::Types as => sub { qw<a b c> };
@@ -117,7 +117,7 @@ use Test::More tests => 14 + 6;
 
 {
  my $expect = qr/^banana at \(eval \d+\) line 2/;
- diag 'This will throw two more warnings' if "$]" >= 5.008008 and "$]" < 5.009;
+ diag 'This will throw two more warnings' if "$]" >= 5.008_008 and "$]" < 5.009;
  local $@;
  eval q[
   use Lexical::Types as => sub { die 'banana' };

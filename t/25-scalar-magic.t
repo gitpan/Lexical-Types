@@ -5,9 +5,11 @@ use warnings;
 
 use Test::More;
 
+use lib 't/lib';
+use VPIT::TestHelpers;
+
 BEGIN {
- plan skip_all => 'Variable::Magic required to test magic'
-                                      unless eval "use Variable::Magic; 1";
+ load_or_skip_all('Variable::Magic', undef, [ ]);
 }
 
 {
@@ -21,7 +23,7 @@ BEGIN {
                 get  => sub { ++$_[1]->{get}; () },
                 set  => sub { ++$_[1]->{set}; () };
  }
- 
+
  sub TYPEDSCALAR { cast $_[1], $wiz, $_[2]; () }
 }
 
@@ -29,7 +31,6 @@ BEGIN {
 
 BEGIN {
  plan tests => 2 * 8;
- defined and diag "Using Variable::Magic $_" for $Variable::Magic::VERSION;
 }
 
 use Lexical::Types as => 'Lexical::Types::Test';

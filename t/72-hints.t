@@ -5,7 +5,9 @@ use warnings;
 
 use Test::More tests => 2;
 
-{
+SKIP: {
+ skip 'This fails on perl 5.11.x even without using Lexical::Types' => 2
+                                              if "$]" >= 5.011 and "$]" < 5.012;
  local %^H = (a => 1);
 
  require Lexical::Types;

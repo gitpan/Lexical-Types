@@ -1,6 +1,6 @@
 package Lexical::Types;
 
-use 5.008003;
+use 5.008_003;
 
 use strict;
 use warnings;
@@ -11,13 +11,13 @@ Lexical::Types - Extend the semantics of typed lexicals.
 
 =head1 VERSION
 
-Version 0.12
+Version 0.13
 
 =cut
 
 our $VERSION;
 BEGIN {
- $VERSION = '0.12';
+ $VERSION = '0.13';
 }
 
 =head1 SYNOPSIS
@@ -76,11 +76,15 @@ BEGIN {
  XSLoader::load(__PACKAGE__, $VERSION);
 }
 
-=head1 FUNCTIONS
+=head1 METHODS
 
-=head2 C<< import [ as => [ $prefix | $mangler ] ] >>
+=head2 C<import>
 
-Magically called when writing C<use Lexical::Types>.
+    use Lexical::Types;
+    use Lexical::Types as => $prefix;
+    use Lexical::Types as => sub { ... }; # = $mangler
+
+Magically called when C<use Lexical::Types> is encountered.
 All the occurences of C<my Str $x> in the current lexical scope will be changed to call at each run a given method in a given package.
 The method and package are determined by the parameter C<'as'> :
 
@@ -110,7 +114,9 @@ If the value given is a code reference C<$mangler>, it will be called at compile
 
 either an empty list, in which case the current typed lexical definition will be skipped (thus it won't be altered to trigger a run-time hook) ;
 
-    use Lexical::Types as => sub { return $_[0] =~ /Str/ ? @_ : () };
+    use Lexical::Types as => sub {
+     return $_[0] =~ /Str/ ? @_ : ()
+    };
     my Str $y; # calls Str->TYPEDSCALAR
     my Int $x; # nothing special
 
@@ -165,7 +171,9 @@ sub import {
 
 =head2 C<unimport>
 
-Magically called when writing C<no Lexical::Types>.
+    no Lexical::Types;
+
+Magically called when C<no Lexical::Types> is encountered.
 Turns the pragma off.
 
 =cut
@@ -257,9 +265,13 @@ This will always be true except on Windows where it's false for perl 5.10.0 and 
 
 =head1 CAVEATS
 
+Using this pragma will cause a slight global slowdown of any subsequent compilation phase that happens anywere in your code - even outside of the scope of use of C<use Lexical::Types> - which may become noticeable if you rely heavily on numerous calls to C<eval STRING>.
+
 The restrictions on the type (being either a defined package name or a constant) apply even if you use the C<'as'> option to redirect to another package, and are unlikely to find a workaround as this happens deep inside the lexer - far from the reach of an extension.
 
 Only one mangler or prefix can be in use at the same time in a given scope.
+
+Typed lexicals declarations that appear in code C<eval>'d during the global destruction phase of a spawned thread or pseudo-fork (the processes used internally for the C<fork> emulation on Windows) are ignored.
 
 The implementation was tweaked to work around several limitations of vanilla C<perl> pragmas : it's thread safe, and doesn't suffer from a C<perl 5.8.x-5.10.0> bug that causes all pragmas to propagate into C<require>d scopes.
 
@@ -273,7 +285,7 @@ L<perl> 5.8.3.
 A C compiler.
 This module may happen to build with a C++ compiler as well, but don't rely on it, as no guarantee is made in this regard.
 
-L<XSLoader> (standard since perl 5.006).
+L<XSLoader> (standard since perl 5.6.0).
 
 =head1 SEE ALSO
 
@@ -308,7 +320,7 @@ Thanks Florian Ragwitz for suggesting the use of constants for types.
 
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2009,2010,2011 Vincent Pit, all rights reserved.
+Copyright 2009,2010,2011,2012,2013,2014 Vincent Pit, all rights reserved.
 
 This program is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
 

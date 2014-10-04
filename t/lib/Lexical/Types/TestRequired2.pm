@@ -15,7 +15,7 @@ Test::More::is($x, 't/lib/Lexical/Types/TestRequired2.pm:' . (__LINE__-1), 'prag
 eval q!
  my Int $y;
  my $desc = 'pragma in use in eval in require';
- if ("$]" <  5.009005) {
+ if ("$]" <  5.009_005) {
   Test::More::is($y, undef, $desc);
  } else {
   Test::More::like($y, qr/^\(eval +\d+\):2$/, $desc);

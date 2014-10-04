@@ -39,7 +39,7 @@ use lib 't/lib';
    ::is($z, __FILE__.':6', 'pragma in use at the end');
   }
  TESTREQUIRED3
- @w = grep !/^warn:Attempt\s+to\s+free\s+unreferenced/, @w if "$]" <= 5.008003;
+ @w = grep !/^warn:Attempt\s+to\s+free\s+unreferenced/, @w if "$]" <= 5.008_003;
  is         $@,     '',  'third require test didn\'t croak prematurely';
  is_deeply \@w,     [ ], 'third require test didn\'t warn';
  is_deeply \@decls, [ map "Int3$_", qw<X Z> ],

@@ -5,9 +5,13 @@ use warnings;
 
 use Test::More;
 
+use lib 't/lib';
+use VPIT::TestHelpers;
+
 BEGIN {
- plan skip_all => 'Variable::Magic 0.35 on 5.10 required to test uvar magic'
-              unless eval "use Variable::Magic 0.35; Variable::Magic::VMG_UVAR";
+ load_or_skip_all('Variable::Magic', '0.35', [ ]);
+ plan skip_all => 'perl 5.10 required to test uvar magic'
+                                             unless Variable::Magic::VMG_UVAR();
 }
 
 {
@@ -34,7 +38,6 @@ BEGIN {
 
 BEGIN {
  plan tests => 2 * 11;
- defined and diag "Using Variable::Magic $_" for $Variable::Magic::VERSION;
 }
 
 use Lexical::Types as => 'Lexical::Types::Test';

@@ -3,33 +3,13 @@
 use strict;
 use warnings;
 
-sub skipall {
- my ($msg) = @_;
- require Test::More;
- Test::More::plan(skip_all => $msg);
-}
+use lib 't/lib';
+use Lexical::Types::TestThreads;
 
-use Config qw<%Config>;
+use Test::More 'no_plan';
 
-BEGIN {
- my $force = $ENV{PERL_LEXICAL_TYPES_TEST_THREADS} ? 1 : !1;
- skipall 'This perl wasn\'t built to support threads'
-                                                    unless $Config{useithreads};
- skipall 'perl 5.13.4 required to test thread safety'
-                                              unless $force or "$]" >= 5.013004;
-}
-
-use threads;
-
-use Test::More;
-
-BEGIN {
- require Lexical::Types;
- skipall 'This Lexical::Types isn\'t thread safe'
-                                         unless Lexical::Types::LT_THREADSAFE();
- plan tests => 10 * 2 * 3 * (1 + 2);
- defined and diag "Using threads $_" for $threads::VERSION;
-}
+my $threads = 10;
+my $runs    = 2;
 
 {
  package Lexical::Types::Test::Tag;
@@ -53,7 +33,7 @@ use Lexical::Types as => 'Lexical::Types::Test::';
 sub try {
  my $tid = threads->tid();
 
- for (1 .. 2) {
+ for (1 .. $runs) {
   my Tag $t;
   is $t, $tid, "typed lexical correctly initialized at run $_ in thread $tid";
 
@@ -76,5 +56,8 @@ EVALD
  }
 }
 
-my @t = map threads->create(\&try), 1 .. 10;
+my @t = map spawn(\&try), 1 .. $threads;
+
 $_->join for @t;
+
+pass 'done';
